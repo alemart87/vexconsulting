@@ -113,7 +113,9 @@ export default function MarkdownEditor({
   }, [editor, editorRef]);
 
   useEffect(() => {
-    editor?.setEditable(editable);
+    // emitUpdate=false: cambiar la editabilidad NO es un cambio de contenido
+    // (si no, marca «cambios sin guardar» apenas carga el documento).
+    editor?.setEditable(editable, false);
   }, [editable, editor]);
 
   const uploadImage = useCallback(
@@ -139,7 +141,9 @@ export default function MarkdownEditor({
   if (!editor) return <div className="card p-10 text-center text-brand-slate">Cargando editor…</div>;
 
   return (
-    <div className="card overflow-hidden">
+    // overflow-clip (NO overflow-hidden): hidden convierte la tarjeta en
+    // contenedor de scroll y la barra sticky queda empujada 64px, tapando el título.
+    <div className="card overflow-clip">
       {editable && (
         <div className="flex flex-wrap items-center gap-0.5 border-b border-brand-border bg-brand-bg-soft px-2 py-1.5 sticky top-16 z-30">
           <ToolbarButton title="Título 1" active={editor.isActive("heading", { level: 1 })}

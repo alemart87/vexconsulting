@@ -524,7 +524,7 @@ export default function DocumentPage() {
         {editable && (
           <div className="flex items-center gap-2">
             <button
-              className="btn-secondary !py-1.5 text-xs whitespace-nowrap"
+              className="btn-editorial !py-1.5 text-xs whitespace-nowrap"
               onClick={runFinalEdit}
               disabled={finalEditing || dirty}
               title={
@@ -533,7 +533,13 @@ export default function DocumentPage() {
                   : "Corrige estilo y ortografía, normaliza citas APA 7, numera tablas y figuras y arma las Referencias. Crea una versión nueva revisable."
               }
             >
-              {finalEditing ? "🪄 Editando…" : "🪄 Edición final APA"}
+              {finalEditing ? (
+                <>
+                  <span className="animate-pulse">✦</span> Editando…
+                </>
+              ) : (
+                <>✦ Edición final APA</>
+              )}
             </button>
             <input
               className="input !w-64 !py-1.5 text-xs"

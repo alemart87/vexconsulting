@@ -259,16 +259,18 @@ export default function MetodoPage() {
 
         {/* Ciclo de vida: cuándo se edita, cuándo se publica */}
         <section>
-          <h2 className="font-display text-2xl md:text-3xl uppercase text-brand-ink mb-2">
+          <h2 className="font-display text-2xl md:text-3xl uppercase text-brand-ink">
             Cuándo se edita: el ciclo de vida del informe
           </h2>
-          <p className="text-sm text-brand-slate mb-5 max-w-3xl leading-relaxed">
-            La edición final APA no ocurre mientras se investiga: es la <b>última etapa
-            antes de publicar</b>. Se lanza a pedido, desde el botón «Edición final APA»
-            del documento maestro, y nunca pisa el trabajo: siempre crea una versión
-            nueva que se revisa antes de dar el visto bueno.
+          <div className="h-1 w-24 bg-brand-primary rounded-full mt-2 mb-4" />
+          <p className="text-[15px] text-brand-graphite mb-6 max-w-3xl leading-relaxed">
+            La edición final APA no ocurre mientras se investiga: es la{" "}
+            <b className="text-brand-ink">última etapa antes de publicar</b>. Se lanza a
+            pedido, desde el botón «Edición final APA» del documento maestro, y nunca
+            pisa el trabajo: siempre crea una versión nueva que se revisa antes de dar
+            el visto bueno.
           </p>
-          <div className="space-y-0">
+          <div className="grid gap-3">
             {[
               {
                 n: "1",
@@ -279,7 +281,8 @@ export default function MetodoPage() {
               },
               {
                 n: "2",
-                titulo: "Edición final APA (botón en el documento)",
+                titulo: "Edición final APA",
+                etiqueta: "Antes de publicar · un clic en el documento",
                 detalle:
                   "Con el contenido cerrado, un consultor lanza la edición final: corrige ortografía y estilo, convierte las citas al formato autor-año, numera tablas y figuras con sus leyendas y arma la lista de Referencias en APA 7. Corre en segundo plano y el resultado se guarda como una versión NUEVA — el texto original queda intacto en el historial.",
                 color: "bg-brand-purple",
@@ -306,26 +309,45 @@ export default function MetodoPage() {
                   "El Word y el PDF salen con portada, índice, numeración «Página X de Y» al pie y sangría francesa APA en las Referencias.",
                 color: "bg-brand-ink",
               },
-            ].map((e, i, arr) => (
-              <div key={e.n} className="flex gap-4">
-                <div className="flex flex-col items-center">
-                  <div
-                    className={`h-9 w-9 shrink-0 rounded-full ${e.color} text-white font-display text-lg flex items-center justify-center`}
-                  >
-                    {e.n}
-                  </div>
-                  {i < arr.length - 1 && <div className="w-px flex-1 bg-brand-border my-1" />}
-                </div>
+            ].map((e) =>
+              e.destacado ? (
                 <div
-                  className={`pb-6 ${e.destacado ? "card p-4 mb-2 border-brand-purple/40 bg-brand-purple/5 flex-1" : "flex-1"}`}
+                  key={e.n}
+                  className="rounded-xl overflow-hidden shadow-elevated flex bg-brand-purple text-white"
                 >
-                  <div className="font-semibold text-sm text-brand-ink">{e.titulo}</div>
-                  <div className="text-sm text-brand-slate leading-relaxed mt-0.5">
-                    {e.detalle}
+                  <div className="w-16 md:w-20 shrink-0 flex items-center justify-center bg-white/15">
+                    <span className="font-display text-4xl leading-none">{e.n}</span>
+                  </div>
+                  <div className="p-5 md:p-6 flex-1">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="font-display uppercase text-lg tracking-wide leading-none">
+                        {e.titulo}
+                      </div>
+                      <span className="text-[10px] uppercase tracking-wider2 font-semibold bg-white text-brand-purple rounded-full px-2.5 py-1">
+                        {e.etiqueta}
+                      </span>
+                    </div>
+                    <p className="text-sm text-white/90 mt-2 leading-relaxed">{e.detalle}</p>
                   </div>
                 </div>
-              </div>
-            ))}
+              ) : (
+                <div key={e.n} className="card overflow-hidden flex">
+                  <div
+                    className={`w-16 md:w-20 shrink-0 flex items-center justify-center ${e.color} text-white`}
+                  >
+                    <span className="font-display text-4xl leading-none">{e.n}</span>
+                  </div>
+                  <div className="p-5 flex-1">
+                    <div className="font-display uppercase text-lg tracking-wide text-brand-ink leading-none">
+                      {e.titulo}
+                    </div>
+                    <p className="text-sm text-brand-graphite mt-2 leading-relaxed">
+                      {e.detalle}
+                    </p>
+                  </div>
+                </div>
+              )
+            )}
           </div>
         </section>
 

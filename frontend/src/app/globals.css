@@ -56,6 +56,15 @@ h3,
   .btn-danger {
     @apply btn px-4 py-2 text-sm bg-white text-brand-primary border border-brand-primary hover:bg-brand-primary hover:text-white;
   }
+  /* Acción editorial (edición final APA): púrpura corporativo, alta visibilidad */
+  .btn-editorial {
+    @apply btn px-5 py-2.5 text-sm text-white active:scale-[0.98] shadow-soft focus:ring-brand-purple;
+    background: linear-gradient(135deg, #662483 0%, #8a35ad 100%);
+  }
+  .btn-editorial:hover:not(:disabled) {
+    background: linear-gradient(135deg, #521d69 0%, #7a2e9a 100%);
+    @apply shadow-elevated;
+  }
 
   .input {
     @apply w-full px-3.5 py-2.5 text-sm bg-white border border-brand-border rounded-md;
