@@ -75,6 +75,7 @@ export default function DocumentPage() {
   const [convId, setConvId] = useState<string | null>(null);
   const [thread, setThread] = useState<ResearchTurn[]>([]);
   const [lastEngine, setLastEngine] = useState<"perplexity" | "openai">("perplexity");
+  const [reader, setReader] = useState<ResearchTurn | null>(null); // modo lectura amplio
   const threadEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -229,10 +230,14 @@ export default function DocumentPage() {
         }),
       });
       setConvId(res.conversation_id);
-      setThread((t) => [
-        ...t,
-        { role: "assistant", content: res.answer, citations: res.citations, engine: res.engine },
-      ]);
+      const turn: ResearchTurn = {
+        role: "assistant",
+        content: res.answer,
+        citations: res.citations,
+        engine: res.engine,
+      };
+      setThread((t) => [...t, turn]);
+      setReader(turn); // abrir en modo lectura amplio automáticamente
     } catch (e: any) {
       setThread((t) => t.slice(0, -1));
       setStatus(`Investigación: ${e.message}`);
@@ -312,8 +317,8 @@ export default function DocumentPage() {
       {status && <div className="text-xs text-emerald-700">{status}</div>}
 
       {/* ==== Editor + Panel de agentes (siempre visible) ==== */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2 min-w-0">
+      <div className="grid gap-4 xl:grid-cols-5">
+        <div className="xl:col-span-3 min-w-0">
           <MarkdownEditor
             projectId={params.id}
             initialMarkdown={doc.content_md}
@@ -323,7 +328,7 @@ export default function DocumentPage() {
           />
         </div>
 
-        <aside className="xl:sticky xl:top-20 h-fit space-y-3">
+        <aside className="xl:col-span-2 xl:sticky xl:top-20 h-fit space-y-3">
           <div className="card overflow-hidden">
             <div className="flex border-b border-brand-border">
               <button
@@ -415,7 +420,7 @@ export default function DocumentPage() {
                         </div>
                       </div>
                     ) : (
-                      <div key={i} className="rounded-lg bg-brand-bg p-2.5 animate-pop">
+                      <div key={i} className="rounded-lg bg-brand-bg p-3 animate-pop">
                         <div className="flex items-center gap-1.5 mb-1.5">
                           <span className={t.engine === "perplexity" ? "badge-primary" : "badge-neutral"}>
                             {t.engine === "perplexity" ? "VEX Consulting IA" : "IA tradicional"}
@@ -425,17 +430,35 @@ export default function DocumentPage() {
                               {t.citations.length} fuentes
                             </span>
                           )}
+                          <button
+                            className="ml-auto text-[11px] font-semibold text-brand-cyan hover:underline"
+                            onClick={() => setReader(t)}
+                            title="Abrir en modo lectura amplio"
+                          >
+                            ⛶ Ampliar
+                          </button>
                         </div>
-                        <div className="prose-vex !text-xs max-h-64 overflow-y-auto [&_h1]:!text-sm [&_h2]:!text-sm [&_h3]:!text-xs">
+                        <div
+                          className="prose-vex !text-sm max-h-56 overflow-hidden relative cursor-pointer [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm"
+                          onClick={() => setReader(t)}
+                          title="Clic para leer completo"
+                        >
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{t.content}</ReactMarkdown>
+                          <div className="absolute bottom-0 inset-x-0 h-12 bg-gradient-to-t from-brand-bg to-transparent" />
                         </div>
                         {editable && (
                           <div className="flex gap-1.5 mt-2">
                             <button
+                              className="btn-secondary !py-1 text-[11px] flex-1"
+                              onClick={() => setReader(t)}
+                            >
+                              📖 Leer completo
+                            </button>
+                            <button
                               className="btn-primary !py-1 text-[11px] flex-1"
                               onClick={() => insertText(t.content)}
                             >
-                              ⤵ Insertar en el cursor
+                              ⤵ Insertar
                             </button>
                             {i === thread.length - 1 && (
                               <button
@@ -511,6 +534,81 @@ export default function DocumentPage() {
               </div>
             )}
           </div>
+
+          {reader && (
+            <div
+              className="fixed inset-0 z-50 bg-brand-ink/60 flex items-start justify-center p-4 md:p-8 animate-fade"
+              onClick={() => setReader(null)}
+            >
+              <div
+                className="card w-full max-w-4xl max-h-[90vh] flex flex-col animate-pop"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-2 px-6 py-3.5 border-b border-brand-border">
+                  <span className={reader.engine === "perplexity" ? "badge-primary" : "badge-neutral"}>
+                    {reader.engine === "perplexity" ? "VEX Consulting IA" : "IA tradicional"}
+                  </span>
+                  {reader.citations && reader.citations.length > 0 && (
+                    <span className="text-xs text-brand-slate">
+                      {reader.citations.length} fuentes verificables
+                    </span>
+                  )}
+                  <div className="ml-auto flex gap-2">
+                    {editable && (
+                      <>
+                        <button
+                          className="btn-primary !py-1.5 text-xs"
+                          onClick={() => {
+                            insertText(reader.content);
+                            setReader(null);
+                          }}
+                        >
+                          ⤵ Insertar en el documento
+                        </button>
+                        <button
+                          className="btn-secondary !py-1.5 text-xs"
+                          disabled={aiLoading}
+                          onClick={() => {
+                            setReader(null);
+                            deepen();
+                          }}
+                        >
+                          🔎 Profundizar
+                        </button>
+                      </>
+                    )}
+                    <button className="btn-ghost !py-1.5 text-xs" onClick={() => setReader(null)}>
+                      ✕ Cerrar
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto px-8 py-6">
+                  <div className="prose-vex">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{reader.content}</ReactMarkdown>
+                  </div>
+                  {reader.citations && reader.citations.length > 0 && (
+                    <div className="mt-6 rounded-lg border border-brand-border bg-brand-bg-soft p-4">
+                      <div className="label mb-2">Fuentes verificables ({reader.citations.length})</div>
+                      <ol className="space-y-1 list-decimal pl-5">
+                        {reader.citations.map((c, i) => (
+                          <li key={i} className="text-sm">
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-brand-cyan underline underline-offset-2"
+                            >
+                              {c.title || c.url}
+                            </a>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {proposals.length > 0 && (
             <div className="card p-3 space-y-2">

@@ -355,16 +355,40 @@ async def suggest_text(
 _RESEARCH_SYSTEM = (
     "Sos «VEX Consulting IA», el investigador experto de una consultora de "
     "investigación de mercado. Redactás en español, registro institucional sobrio, "
-    "con método científico: hipótesis, evidencia con fuente, distinción entre hecho "
-    "y estimación. Investigá la consulta con las herramientas de búsqueda y con las "
-    "fuentes internas provistas; si hay historial de la investigación, CONSTRUÍ sobre "
-    "él (profundizá, desagregá, verificá — no repitas lo ya dicho). Respondé SOLO con "
-    "el bloque en Markdown listo para insertar en el informe: hallazgos con cifras "
-    "concretas, cada cifra con su referencia numerada [n] correspondiente a los "
-    "resultados de búsqueda (no inventes números) o con la cita entre corchetes para "
-    "fuentes internas. NO agregues una lista de fuentes al final: el sistema la "
-    "agrega automáticamente. Sin preámbulos."
+    "con método científico. Investigá EN PROFUNDIDAD con las herramientas de búsqueda "
+    "y las fuentes internas provistas; si hay historial, CONSTRUÍ sobre él (desagregá, "
+    "verificá, no repitas).\n\n"
+    "Estructura obligatoria de tu respuesta (Markdown plano, SIN envolver en bloques "
+    "de código ```):\n"
+    "## Hallazgos\n"
+    "Hallazgos numerados; cada uno con cifra concreta, año y referencia [n]. Nada de "
+    "generalidades sin dato.\n"
+    "## Comparativa\n"
+    "Una tabla Markdown cuando haya datos comparables (países, años, segmentos, "
+    "rangos). Si no aplica, omitila.\n"
+    "## Análisis\n"
+    "Qué significan los datos: tendencias, discrepancias entre fuentes (señalalas "
+    "explícitamente con ambas cifras), y qué tan sólida es la evidencia.\n"
+    "## Implicancias para la investigación\n"
+    "2-4 viñetas conectando los hallazgos con el proyecto del consultor.\n\n"
+    "Reglas: cada cifra lleva su referencia numerada [n] correspondiente a los "
+    "resultados de búsqueda (no inventes números) o la cita entre corchetes para "
+    "fuentes internas. NO agregues lista de fuentes al final (el sistema la agrega). "
+    "Sin preámbulos ni cierres de cortesía. Mínimo 400 palabras salvo que la consulta "
+    "sea trivial."
 )
+
+
+def _clean_answer(answer: str) -> str:
+    """Quita fences de código que envuelven toda la respuesta (rompen el render)."""
+    text = (answer or "").strip()
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        if first_newline != -1 and text.rstrip().endswith("```"):
+            text = text[first_newline + 1 :].rstrip()
+            if text.endswith("```"):
+                text = text[:-3].rstrip()
+    return text
 
 
 def _linkify_citations(answer: str, citations: list[dict]) -> str:
@@ -437,6 +461,7 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float
                 "input": user_prompt,
                 "instructions": _RESEARCH_SYSTEM,
                 "tools": [{"type": "web_search"}],
+                "max_output_tokens": 6000,
             },
         )
         if resp.status_code == 401:
@@ -627,7 +652,8 @@ async def research(
             seen.add(url)
             unique_citations.append(c)
 
-    # Referencias [n] → enlaces + lista de fuentes formateada con títulos
+    # Limpieza de formato + referencias [n] → enlaces + lista de fuentes con títulos
+    answer = _clean_answer(answer)
     answer = _linkify_citations(answer, unique_citations)
 
     # Persistir el intercambio en el hilo (memoria del investigador)
