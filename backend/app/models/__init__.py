@@ -16,3 +16,4 @@ from .conversation import Conversation, Message  # noqa: F401
 from .evaluation import Evaluation  # noqa: F401
 from .export_job import ExportJob  # noqa: F401
 from .chat import ChatChannel, ChatMessage  # noqa: F401
+from .notification import Notification  # noqa: F401

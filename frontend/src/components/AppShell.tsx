@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { CurrentUserInfo, ROLE_LABELS, clearSession, getToken, getUser } from "@/lib/api";
 import Brand from "./Brand";
+import NotificationBell from "./NotificationBell";
 
 function NavLink({ href, label }: { href: string; label: string }) {
   const pathname = usePathname();
@@ -60,6 +61,7 @@ export default function AppShell({
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
           <div className="flex items-center gap-3">
+            <NotificationBell />
             <div className="hidden sm:block text-right">
               <div className="text-sm font-semibold text-brand-ink leading-tight">
                 {user.full_name}

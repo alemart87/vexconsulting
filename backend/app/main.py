@@ -176,7 +176,7 @@ app.include_router(versions_router.router, prefix=API)
 app.include_router(audit_router.router, prefix=API)
 
 # Routers de fases 2-4 se montan si existen (import tolerante durante el desarrollo)
-for module_name in ("sources", "search", "notes", "gantt", "agent", "evaluations", "exports", "metrics", "files", "chat"):
+for module_name in ("sources", "search", "notes", "gantt", "agent", "evaluations", "exports", "metrics", "files", "chat", "notifications"):
     try:
         module = __import__(f"app.api.v1.{module_name}", fromlist=["router"])
         app.include_router(module.router, prefix=API)

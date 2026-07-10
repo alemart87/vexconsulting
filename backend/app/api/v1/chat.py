@@ -16,6 +16,7 @@ from ...models.note import Note
 from ...models.project_member import ProjectMember
 from ...models.user import User
 from ...services.audit_service import log_action
+from ...services.notification_service import notify, project_member_ids
 from ..deps import ProjectAccess, require_project_read
 
 router = APIRouter(prefix="/projects/{project_id}/chat", tags=["chat"])
@@ -199,7 +200,7 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     _require_chat_access(access)
-    await _get_channel(db, project_id, channel_id, access.user.id)
+    channel = await _get_channel(db, project_id, channel_id, access.user.id)
 
     message = ChatMessage(
         channel_id=channel_id,
@@ -210,6 +211,39 @@ async def send_message(
         mentions=payload.mentions,
     )
     db.add(message)
+
+    # --- Notificaciones (campana): menciones > directo > tema ---
+    author = access.user
+    preview = f"{author.full_name}: {message.content[:120]}"
+    link = f"/projects/{project_id}/chat"
+    raw_mentions = (payload.mentions or {}).get("users") or []
+    mentioned = {
+        (m.get("id") if isinstance(m, dict) else m) for m in raw_mentions
+    } - {author.id, None}
+    if mentioned:
+        await notify(
+            db, recipients=mentioned, project_id=project_id, kind="mencion",
+            title=f"{author.full_name} te mencionó en #{channel.name} · {access.project.name}",
+            body=message.content[:200], link=link, entity_id=channel_id,
+            actor_name=author.full_name,
+        )
+    if channel.kind == "dm":
+        others = set((channel.dm_key or "").split("|")) - {author.id} - mentioned
+        await notify(
+            db, recipients=others, project_id=project_id, kind="chat",
+            title=f"Directo de {author.full_name} · {access.project.name}",
+            body=message.content[:200], link=link, entity_id=channel_id,
+            actor_name=author.full_name,
+        )
+    else:
+        members = await project_member_ids(db, access.project)
+        await notify(
+            db, recipients=members - {author.id} - mentioned, project_id=project_id,
+            kind="chat", title=f"#{channel.name} · {access.project.name}",
+            body=preview, link=link, entity_id=channel_id,
+            actor_name=author.full_name,
+        )
+
     await db.commit()
     await db.refresh(message)
     return {

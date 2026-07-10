@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...models.note import NOTE_KINDS, NOTE_STATUSES, Note
+from ...services.notification_service import notify, project_member_ids
 from ..deps import ProjectAccess, require_project_read, require_project_write
 
 router = APIRouter(prefix="/projects/{project_id}/notes", tags=["notes"])
@@ -70,6 +71,28 @@ async def create_note(
         created_by_name=access.user.full_name,
     )
     db.add(note)
+
+    # Notificaciones: el asignado recibe aviso propio; el resto del equipo, uno general.
+    kind_label = {"nota": "Nota", "hipotesis": "Hipótesis", "hallazgo": "Hallazgo", "tarea": "Tarea"}
+    label = kind_label.get(note.kind, "Nota")
+    link = f"/projects/{project_id}/notes"
+    members = await project_member_ids(db, access.project)
+    assigned = {payload.assigned_to} if payload.assigned_to else set()
+    if assigned - {access.user.id}:
+        await notify(
+            db, recipients=assigned - {access.user.id}, project_id=project_id,
+            kind="mencion",
+            title=f"{access.user.full_name} te asignó una {label.lower()} · {access.project.name}",
+            body=note.title, link=link, entity_id=note.id, actor_name=access.user.full_name,
+            dedupe=False,
+        )
+    await notify(
+        db, recipients=members - {access.user.id} - assigned, project_id=project_id,
+        kind="nota", title=f"{label} nueva · {access.project.name}",
+        body=f"{access.user.full_name}: {note.title}", link=link, entity_id=note.id,
+        actor_name=access.user.full_name, dedupe=False,
+    )
+
     await db.commit()
     await db.refresh(note)
     return _out(note)
