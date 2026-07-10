@@ -570,30 +570,33 @@ def _linkify_citations(answer: str, citations: list[dict]) -> str:
     return answer
 
 
-async def _load_research_history(db: AsyncSession, conversation_id: str) -> str:
-    """Últimos N mensajes del hilo como transcript para dar continuidad."""
+async def _load_research_history(
+    db: AsyncSession, conversation_id: str, generous: bool = False
+) -> str:
+    """Últimos N mensajes del hilo como transcript.
+
+    generous=True: modo analista — el hilo entra casi completo (analizar toda
+    la conversación exige ver toda la conversación)."""
     rows = await db.execute(
         select(Message).where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at.desc()).limit(settings.agent_max_history)
     )
     messages = list(reversed(rows.scalars().all()))
-    if not messages:
-        return ""
-    # Excluir placeholders en curso (contenido vacío) y el último mensaje del
-    # usuario si coincide con la consulta actual la duplica el prompt — inocuo.
+    # Excluir placeholders en curso (contenido vacío)
     messages = [m for m in messages if (m.content or "").strip()]
     if not messages:
         return ""
-    parts = ["\n\nHISTORIAL DE LA INVESTIGACIÓN (construí sobre esto, no lo repitas):"]
-    # Los mensajes recientes conservan más contenido (el analista de gráficos
-    # necesita los datos completos de la última investigación).
+    parts = ["\n\nHISTORIAL COMPLETO DE LA INVESTIGACIÓN (en orden cronológico):"]
     total = len(messages)
+    recent_limit, older_limit, tail_cap = (
+        (9000, 3000, 80000) if generous else (6000, 1200, 30000)
+    )
     for idx, m in enumerate(messages):
         who = "Consultor" if m.role == "user" else "VEX Consulting IA"
-        limit = 6000 if idx >= total - 4 else 1200
+        limit = recent_limit if idx >= total - 6 else older_limit
         parts.append(f"{who}: {(m.content or '')[:limit]}")
     transcript = "\n\n".join(parts)
-    return transcript[-30000:]
+    return transcript[-tail_cap:]
 
 
 async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float]:
@@ -697,27 +700,70 @@ _CHART_INTENT = _re_mod.compile(
 )
 
 _ANALYST_SYSTEM = (
-    "Sos el analista de datos de VEX Consulting. Recibís el historial de una "
-    "investigación de mercado y un pedido de gráfico/análisis. Trabajás SOLO con "
-    "los datos presentes en el historial y el contexto (no inventes cifras; si un "
-    "dato viene en rango, usá el punto medio y aclaralo). Elegí las categorías y "
-    "series que mejor respondan al pedido.\n"
+    "Sos el analista senior de VEX Consulting, participando en el hilo de una "
+    "investigación de mercado. Recibís el HISTORIAL COMPLETO de la conversación y "
+    "un pedido del consultor (analizar, sintetizar, concluir, comparar, graficar). "
+    "Respondé de forma DIRECTA y conversacional-profesional, como un colega senior: "
+    "si pide conclusiones, tomá posición clara; si pide análisis del contexto, "
+    "analizá TODO el hilo, no solo el último mensaje. Trabajás SOLO con los datos "
+    "del historial y el contexto (no inventes cifras; si un dato viene en rango, "
+    "usá el punto medio y aclaralo). Mantené las referencias [n] que ya trae el "
+    "historial al citar cifras.\n"
     "Respondé SOLO con JSON válido:\n"
-    "{\"title\": str, \"chart\": {\"type\": \"bar\"|\"line\", \"y_label\": str, "
-    "\"series\": [{\"name\": str, \"points\": [{\"label\": str, \"value\": number}]}]}, "
-    "\"analysis_md\": str (análisis ejecutivo del gráfico en 1-3 párrafos Markdown, "
-    "con las referencias [n] que ya trae el historial cuando cites cifras), "
-    "\"fuente_md\": str (línea 'Fuente: ...' indicando de qué investigación salen los datos)}\n"
-    "Si el historial no tiene datos suficientes para el gráfico pedido, respondé "
-    "{\"error\": \"explicación breve de qué dato falta\"}."
+    "{\"analysis_md\": str,  // tu respuesta completa en Markdown: análisis, síntesis "
+    "y/o conclusiones. Si un gráfico sustenta un punto, insertá el marcador "
+    "[GRAFICO_1] (y [GRAFICO_2], [GRAFICO_3]) en el lugar exacto del texto.\n"
+    " \"charts\": [{\"title\": str, \"type\": \"bar\"|\"line\", \"y_label\": str, "
+    "\"series\": [{\"name\": str, \"points\": [{\"label\": str, \"value\": number}]}]}]"
+    "  // 0 a 3 gráficos con datos del historial; [] si no aportan\n"
+    "}\n"
+    "Si el pedido requiere datos que el historial no tiene, decilo en analysis_md "
+    "e indicá qué habría que investigar (charts: [])."
 )
+
+_ROUTER_SYSTEM = (
+    "Sos el enrutador de un asistente de investigación. Decidí si el mensaje del "
+    "consultor requiere BUSCAR INFORMACIÓN NUEVA en la web (respondé: web) o pide "
+    "ANALIZAR/SINTETIZAR/CONCLUIR/GRAFICAR sobre lo ya conversado en el hilo "
+    "(respondé: analisis). Ante la duda sobre datos externos nuevos: web. "
+    "Respondé UNA sola palabra: web | analisis."
+)
+
+
+async def _route_query(query: str, history_tail: str) -> str:
+    """Clasifica el turno: 'web' (investigación externa) o 'analisis' (trabajar
+    sobre el hilo). Los pedidos explícitos de gráfico van directo a análisis."""
+    if _CHART_INTENT.search(query):
+        return "analisis"
+    if not settings.openai_api_key:
+        return "web"
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=30)
+        resp = await client.chat.completions.create(
+            model=settings.agent_model,
+            max_completion_tokens=2000,
+            messages=[
+                {"role": "system", "content": _ROUTER_SYSTEM},
+                {
+                    "role": "user",
+                    "content": f"Últimos intercambios del hilo:\n{history_tail[-1200:]}\n\n"
+                    f"Mensaje del consultor: {query}",
+                },
+            ],
+        )
+        verdict = (resp.choices[0].message.content or "").strip().lower()
+        return "analisis" if "analisis" in verdict or "análisis" in verdict else "web"
+    except Exception:
+        return "web"
 
 
 async def _chart_task(
     query: str, history_block: str, context_block: str, project_id: str
 ) -> tuple[str, list[dict], float, str]:
-    """Turno del analista: GPT arma la especificación del gráfico a partir del
-    hilo; se renderiza a SVG de marca y se guarda como imagen del proyecto."""
+    """Turno del analista integral: GPT analiza el HILO COMPLETO de forma
+    conversacional y sustenta con 0-3 gráficos renderizados a SVG de marca."""
     import json as _json
     import uuid as _uuid
 
@@ -729,7 +775,7 @@ async def _chart_task(
     if not settings.openai_api_key:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
 
-    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=120)
+    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180)
     resp = await client.chat.completions.create(
         model=settings.agent_model,
         response_format={"type": "json_object"},
@@ -737,7 +783,7 @@ async def _chart_task(
             {"role": "system", "content": _ANALYST_SYSTEM},
             {
                 "role": "user",
-                "content": f"PEDIDO: {query}\n{history_block or '(sin historial)'}{context_block}",
+                "content": f"PEDIDO DEL CONSULTOR: {query}\n{history_block or '(sin historial)'}{context_block}",
             },
         ],
     )
@@ -748,38 +794,38 @@ async def _chart_task(
     try:
         data = _json.loads(resp.choices[0].message.content or "{}")
     except Exception:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "El analista no devolvió una especificación válida")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "El analista no devolvió una respuesta válida")
 
-    if data.get("error"):
-        answer = (
-            f"**No pude generar el gráfico:** {data['error']}\n\n"
-            "Sugerencia: investigá primero los datos en este mismo hilo y volvé a pedir el gráfico."
-        )
-        return answer, [], cost, "analista"
+    analysis = (data.get("analysis_md") or "").strip()
+    charts = (data.get("charts") or [])[:3]
 
-    spec = data.get("chart") or {}
-    title = (data.get("title") or "Gráfico").strip()
-    try:
-        svg = render_chart_svg(spec)
-    except Exception as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"No se pudo dibujar el gráfico: {exc}")
-
-    # Guardar como imagen del proyecto (URL de capacidad, igual que las del editor)
     images_dir = settings.upload_path / project_id / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
-    name = f"chart-{_uuid.uuid4().hex[:12]}.svg"
-    (images_dir / name).write_text(svg, encoding="utf-8")
-    url = f"/api/v1/projects/{project_id}/images/{name}"
 
-    table = spec_to_markdown_table(spec)
-    parts = [f"### {title}", "", f"![{title}]({url})", ""]
-    if data.get("analysis_md"):
-        parts += [data["analysis_md"].strip(), ""]
-    if table:
-        parts += ["<details><summary>Datos del gráfico</summary>", "", table, "", "</details>", ""]
-    if data.get("fuente_md"):
-        parts.append(f"*{data['fuente_md'].strip()}*")
-    return "\n".join(parts).strip(), [], cost, "analista"
+    for i, spec in enumerate(charts, start=1):
+        title = (spec.get("title") or f"Gráfico {i}").strip()
+        try:
+            svg = render_chart_svg(spec)
+        except Exception:
+            continue  # un gráfico fallido no tumba el análisis
+        name = f"chart-{_uuid.uuid4().hex[:12]}.svg"
+        (images_dir / name).write_text(svg, encoding="utf-8")
+        url = f"/api/v1/projects/{project_id}/images/{name}"
+        table = spec_to_markdown_table(spec)
+        block_parts = [f"![{title}]({url})"]
+        if table:
+            block_parts += ["", "<details><summary>Datos del gráfico</summary>", "", table, "", "</details>"]
+        block = "\n".join(block_parts)
+
+        marker = f"[GRAFICO_{i}]"
+        if marker in analysis:
+            analysis = analysis.replace(marker, block)
+        else:
+            analysis += f"\n\n### {title}\n\n{block}"
+
+    if not analysis:
+        analysis = "No pude producir el análisis con el contenido disponible del hilo."
+    return analysis.strip(), [], cost, "analista"
 
 
 async def _project_grounding(
@@ -946,10 +992,14 @@ async def _run_research_job(
         user_prompt = f"CONSULTA DE INVESTIGACIÓN: {query}{history_block}{context_block}{grounding}"
 
         citations: list[dict] = []
-        # ── Orquestador: pedido de gráfico/visualización → analista GPT ──
-        if _CHART_INTENT.search(query):
+        # ── Orquestador: el enrutador decide si el turno pide investigación web
+        # nueva o análisis/síntesis/gráficos sobre el hilo existente ──
+        route = await _route_query(query, history_block)
+        if route == "analisis":
+            async with session_scope() as db:
+                history_full = await _load_research_history(db, conversation_id, generous=True)
             answer, citations, cost_usd, engine_used = await _chart_task(
-                query, history_block, context_block, project_id
+                query, history_full, context_block, project_id
             )
         elif engine == "perplexity":
             if not settings.perplexity_enabled:
