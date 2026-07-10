@@ -380,7 +380,9 @@ _RESEARCH_SYSTEM = (
 
 
 def _clean_answer(answer: str) -> str:
-    """Quita fences de código que envuelven toda la respuesta (rompen el render)."""
+    """Normaliza la respuesta para que renderice como prosa Markdown:
+    quita fences ``` que envuelven todo y des-indenta (líneas con sangría
+    uniforme se interpretan como bloque de código y rompen el formato)."""
     text = (answer or "").strip()
     if text.startswith("```"):
         first_newline = text.find("\n")
@@ -388,6 +390,14 @@ def _clean_answer(answer: str) -> str:
             text = text[first_newline + 1 :].rstrip()
             if text.endswith("```"):
                 text = text[:-3].rstrip()
+
+    lines = text.split("\n")
+    non_empty = [ln for ln in lines if ln.strip()]
+    if non_empty:
+        indent = min(len(ln) - len(ln.lstrip(" ")) for ln in non_empty)
+        if indent > 0:
+            lines = [ln[indent:] if ln.strip() else "" for ln in lines]
+            text = "\n".join(lines)
     return text
 
 

@@ -21,8 +21,9 @@ interface Doc {
   updated_at: string;
 }
 
-/** Mensajes de investigación guardados antes del arreglo del backend pueden venir
- * envueltos en fences ``` (se renderizaban como bloque de código). Se limpian acá. */
+/** Normaliza Markdown guardado: quita fences ``` que envuelven todo y
+ * des-indenta (la sangría uniforme se renderiza como bloque de código:
+ * monoespaciado, sin links, sin formato). */
 function cleanMd(text: string): string {
   let t = (text || "").trim();
   if (t.startsWith("```")) {
@@ -30,6 +31,14 @@ function cleanMd(text: string): string {
     if (nl !== -1 && t.trimEnd().endsWith("```")) {
       t = t.slice(nl + 1).trimEnd();
       if (t.endsWith("```")) t = t.slice(0, -3).trimEnd();
+    }
+  }
+  const lines = t.split("\n");
+  const nonEmpty = lines.filter((l) => l.trim());
+  if (nonEmpty.length) {
+    const indent = Math.min(...nonEmpty.map((l) => l.length - l.trimStart().length));
+    if (indent > 0) {
+      t = lines.map((l) => (l.trim() ? l.slice(indent) : "")).join("\n");
     }
   }
   return t;
@@ -452,13 +461,8 @@ export default function DocumentPage() {
                             ⛶ Ampliar
                           </button>
                         </div>
-                        <div
-                          className="prose-vex !text-sm max-h-96 overflow-hidden relative cursor-pointer [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm"
-                          onClick={() => setReader(t)}
-                          title="Clic para leer completo"
-                        >
+                        <div className="prose-vex !text-sm max-h-96 overflow-y-auto pr-1.5 [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{t.content}</ReactMarkdown>
-                          <div className="absolute bottom-0 inset-x-0 h-12 bg-gradient-to-t from-brand-bg to-transparent" />
                         </div>
                         {editable && (
                           <div className="flex gap-1.5 mt-2">
