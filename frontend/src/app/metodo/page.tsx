@@ -257,6 +257,78 @@ export default function MetodoPage() {
           </div>
         </section>
 
+        {/* Ciclo de vida: cuándo se edita, cuándo se publica */}
+        <section>
+          <h2 className="font-display text-2xl md:text-3xl uppercase text-brand-ink mb-2">
+            Cuándo se edita: el ciclo de vida del informe
+          </h2>
+          <p className="text-sm text-brand-slate mb-5 max-w-3xl leading-relaxed">
+            La edición final APA no ocurre mientras se investiga: es la <b>última etapa
+            antes de publicar</b>. Se lanza a pedido, desde el botón «Edición final APA»
+            del documento maestro, y nunca pisa el trabajo: siempre crea una versión
+            nueva que se revisa antes de dar el visto bueno.
+          </p>
+          <div className="space-y-0">
+            {[
+              {
+                n: "1",
+                titulo: "Redacción e investigación",
+                detalle:
+                  "Los consultores escriben el documento maestro apoyados por el agente investigador. Cada guardado crea una versión con autor y diferencias.",
+                color: "bg-brand-cyan",
+              },
+              {
+                n: "2",
+                titulo: "Edición final APA (botón en el documento)",
+                detalle:
+                  "Con el contenido cerrado, un consultor lanza la edición final: corrige ortografía y estilo, convierte las citas al formato autor-año, numera tablas y figuras con sus leyendas y arma la lista de Referencias en APA 7. Corre en segundo plano y el resultado se guarda como una versión NUEVA — el texto original queda intacto en el historial.",
+                color: "bg-brand-purple",
+                destacado: true,
+              },
+              {
+                n: "3",
+                titulo: "Revisión con diff",
+                detalle:
+                  "En el historial de versiones se comparan línea por línea los cambios de la edición final. Si algo no convence, se restaura la versión anterior o se ajusta a mano.",
+                color: "bg-brand-orange",
+              },
+              {
+                n: "4",
+                titulo: "Publicación",
+                detalle:
+                  "El líder publica el proyecto: la versión aprobada queda congelada y es la única que ven los visualizadores.",
+                color: "bg-brand-primary",
+              },
+              {
+                n: "5",
+                titulo: "Exportación paginada",
+                detalle:
+                  "El Word y el PDF salen con portada, índice, numeración «Página X de Y» al pie y sangría francesa APA en las Referencias.",
+                color: "bg-brand-ink",
+              },
+            ].map((e, i, arr) => (
+              <div key={e.n} className="flex gap-4">
+                <div className="flex flex-col items-center">
+                  <div
+                    className={`h-9 w-9 shrink-0 rounded-full ${e.color} text-white font-display text-lg flex items-center justify-center`}
+                  >
+                    {e.n}
+                  </div>
+                  {i < arr.length - 1 && <div className="w-px flex-1 bg-brand-border my-1" />}
+                </div>
+                <div
+                  className={`pb-6 ${e.destacado ? "card p-4 mb-2 border-brand-purple/40 bg-brand-purple/5 flex-1" : "flex-1"}`}
+                >
+                  <div className="font-semibold text-sm text-brand-ink">{e.titulo}</div>
+                  <div className="text-sm text-brand-slate leading-relaxed mt-0.5">
+                    {e.detalle}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <footer className="text-center text-xs text-brand-slate pb-6">
           VEX Consulting · Plataforma de investigación de mercado · Voicenter S.A.
         </footer>
