@@ -21,6 +21,20 @@ interface Doc {
   updated_at: string;
 }
 
+/** Mensajes de investigación guardados antes del arreglo del backend pueden venir
+ * envueltos en fences ``` (se renderizaban como bloque de código). Se limpian acá. */
+function cleanMd(text: string): string {
+  let t = (text || "").trim();
+  if (t.startsWith("```")) {
+    const nl = t.indexOf("\n");
+    if (nl !== -1 && t.trimEnd().endsWith("```")) {
+      t = t.slice(nl + 1).trimEnd();
+      if (t.endsWith("```")) t = t.slice(0, -3).trimEnd();
+    }
+  }
+  return t;
+}
+
 const AI_ACTIONS = [
   { label: "▸ Continuar", instruction: "" },
   {
@@ -90,7 +104,7 @@ export default function DocumentPage() {
         setThread(
           msgs.map((m) => ({
             role: m.role,
-            content: m.content,
+            content: m.role === "assistant" ? cleanMd(m.content) : m.content,
             citations: m.tool_calls?.citations,
             engine: m.tool_calls?.engine,
           }))
@@ -232,7 +246,7 @@ export default function DocumentPage() {
       setConvId(res.conversation_id);
       const turn: ResearchTurn = {
         role: "assistant",
-        content: res.answer,
+        content: cleanMd(res.answer),
         citations: res.citations,
         engine: res.engine,
       };
@@ -403,7 +417,7 @@ export default function DocumentPage() {
                 )}
 
                 {/* Hilo de investigación con memoria */}
-                <div className="max-h-[46vh] overflow-y-auto space-y-2.5 pr-1">
+                <div className="max-h-[56vh] overflow-y-auto space-y-2.5 pr-1">
                   {thread.length === 0 && !aiLoading && (
                     <p className="text-[11px] text-brand-slate leading-relaxed py-2">
                       Este es tu lienzo de investigación: el investigador experto recuerda el
@@ -439,7 +453,7 @@ export default function DocumentPage() {
                           </button>
                         </div>
                         <div
-                          className="prose-vex !text-sm max-h-56 overflow-hidden relative cursor-pointer [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm"
+                          className="prose-vex !text-sm max-h-96 overflow-hidden relative cursor-pointer [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm"
                           onClick={() => setReader(t)}
                           title="Clic para leer completo"
                         >

@@ -138,15 +138,21 @@ h3,
 .prose-vex ol { @apply list-decimal pl-6 my-3; }
 .prose-vex li { @apply my-1; }
 .prose-vex blockquote { @apply border-l-4 border-brand-primary/40 pl-4 italic text-brand-slate my-4; }
-.prose-vex code { @apply bg-brand-bg px-1.5 py-0.5 rounded text-[13px] text-brand-purple; }
-.prose-vex pre { @apply bg-brand-ink text-white p-4 rounded-lg overflow-x-auto my-4; }
-.prose-vex pre code { @apply bg-transparent text-white p-0; }
+.prose-vex code { @apply bg-brand-bg px-1.5 py-0.5 rounded text-[13px] text-brand-purple break-words; }
+/* Nunca scroll horizontal: los bloques preformateados envuelven línea */
+.prose-vex pre {
+  @apply bg-brand-bg text-brand-graphite p-4 rounded-lg my-4 border border-brand-border;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: hidden;
+}
+.prose-vex pre code { @apply bg-transparent text-brand-graphite p-0; }
 .prose-vex img { @apply max-w-full rounded-lg shadow-soft my-4; }
 .prose-vex a { @apply text-brand-cyan underline underline-offset-2; }
 .prose-vex hr { @apply my-6 border-brand-border; }
-.prose-vex table { @apply w-full border-collapse my-4 text-sm; }
-.prose-vex th { @apply bg-brand-bg border border-brand-border px-3 py-2 text-left font-semibold; }
-.prose-vex td { @apply border border-brand-border px-3 py-2; }
+.prose-vex table { @apply w-full border-collapse my-4 text-sm; table-layout: fixed; }
+.prose-vex th { @apply bg-brand-bg border border-brand-border px-3 py-2 text-left font-semibold; word-break: break-word; }
+.prose-vex td { @apply border border-brand-border px-3 py-2; word-break: break-word; }
 
 .tiptap:focus { outline: none; }
 .tiptap p.is-editor-empty:first-child::before {

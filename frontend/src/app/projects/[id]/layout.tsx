@@ -43,7 +43,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   );
 
   return (
-    <AppShell>
+    <AppShell fluid>
       {error ? (
         <div className="card p-8 text-center text-brand-primary-dark">{error}</div>
       ) : (

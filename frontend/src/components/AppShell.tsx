@@ -16,7 +16,14 @@ function NavLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({
+  children,
+  fluid = false,
+}: {
+  children: React.ReactNode;
+  /** true = área de trabajo ancha (aprovecha monitores grandes). */
+  fluid?: boolean;
+}) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUserInfo | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -84,7 +91,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
       </header>
 
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-6">{children}</main>
+      <main
+        className={`flex-1 mx-auto w-full px-4 py-6 ${fluid ? "max-w-[1760px]" : "max-w-7xl"}`}
+      >
+        {children}
+      </main>
 
       <footer className="border-t border-brand-border bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 text-xs text-brand-slate flex justify-between">
