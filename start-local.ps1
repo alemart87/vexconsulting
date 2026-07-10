@@ -11,10 +11,11 @@ Start-Process powershell -ArgumentList @(
 
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "`$host.UI.RawUI.WindowTitle = 'VEX frontend :3000'; cd '$root\frontend'; npm run dev"
+    "`$host.UI.RawUI.WindowTitle = 'VEX frontend :3000'; cd '$root\frontend'; npx next dev -H 0.0.0.0 -p 3000"
 )
 
 Write-Host "VEX Consulting iniciando..."
 Write-Host "  App:     http://localhost:3000"
 Write-Host "  Backend: http://127.0.0.1:8000/health"
 Write-Host "Para detener: cerra las dos ventanas de PowerShell."
+
