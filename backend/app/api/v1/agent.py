@@ -444,11 +444,15 @@ async def _load_research_history(db: AsyncSession, conversation_id: str) -> str:
     if not messages:
         return ""
     parts = ["\n\nHISTORIAL DE LA INVESTIGACIÓN (construí sobre esto, no lo repitas):"]
-    for m in messages:
+    # Los mensajes recientes conservan más contenido (el analista de gráficos
+    # necesita los datos completos de la última investigación).
+    total = len(messages)
+    for idx, m in enumerate(messages):
         who = "Consultor" if m.role == "user" else "VEX Consulting IA"
-        parts.append(f"{who}: {(m.content or '')[:1500]}")
+        limit = 6000 if idx >= total - 4 else 1200
+        parts.append(f"{who}: {(m.content or '')[:limit]}")
     transcript = "\n\n".join(parts)
-    return transcript[-14000:]
+    return transcript[-30000:]
 
 
 async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float]:
@@ -543,6 +547,100 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float
     return answer, citations, cost
 
 
+import re as _re_mod
+
+# Orquestador: pedidos de gráfico/visualización se enrutan al analista GPT,
+# que trabaja con los datos ya presentes en el hilo (no vuelve a buscar).
+_CHART_INTENT = _re_mod.compile(
+    r"gr[aá]fic|chart|visualiz|diagrama|barras|torta|de\s+l[ií]neas|plot", _re_mod.IGNORECASE
+)
+
+_ANALYST_SYSTEM = (
+    "Sos el analista de datos de VEX Consulting. Recibís el historial de una "
+    "investigación de mercado y un pedido de gráfico/análisis. Trabajás SOLO con "
+    "los datos presentes en el historial y el contexto (no inventes cifras; si un "
+    "dato viene en rango, usá el punto medio y aclaralo). Elegí las categorías y "
+    "series que mejor respondan al pedido.\n"
+    "Respondé SOLO con JSON válido:\n"
+    "{\"title\": str, \"chart\": {\"type\": \"bar\"|\"line\", \"y_label\": str, "
+    "\"series\": [{\"name\": str, \"points\": [{\"label\": str, \"value\": number}]}]}, "
+    "\"analysis_md\": str (análisis ejecutivo del gráfico en 1-3 párrafos Markdown, "
+    "con las referencias [n] que ya trae el historial cuando cites cifras), "
+    "\"fuente_md\": str (línea 'Fuente: ...' indicando de qué investigación salen los datos)}\n"
+    "Si el historial no tiene datos suficientes para el gráfico pedido, respondé "
+    "{\"error\": \"explicación breve de qué dato falta\"}."
+)
+
+
+async def _chart_task(
+    query: str, history_block: str, context_block: str, project_id: str
+) -> tuple[str, list[dict], float, str]:
+    """Turno del analista: GPT arma la especificación del gráfico a partir del
+    hilo; se renderiza a SVG de marca y se guarda como imagen del proyecto."""
+    import json as _json
+    import uuid as _uuid
+
+    from openai import AsyncOpenAI
+
+    from ...services.agent.pricing import compute_cost_usd
+    from ...services.chart_service import render_chart_svg, spec_to_markdown_table
+
+    if not settings.openai_api_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=120)
+    resp = await client.chat.completions.create(
+        model=settings.agent_model,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": _ANALYST_SYSTEM},
+            {
+                "role": "user",
+                "content": f"PEDIDO: {query}\n{history_block or '(sin historial)'}{context_block}",
+            },
+        ],
+    )
+    cost = 0.0
+    if resp.usage:
+        cost = compute_cost_usd(resp.usage.prompt_tokens or 0, resp.usage.completion_tokens or 0)
+
+    try:
+        data = _json.loads(resp.choices[0].message.content or "{}")
+    except Exception:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "El analista no devolvió una especificación válida")
+
+    if data.get("error"):
+        answer = (
+            f"**No pude generar el gráfico:** {data['error']}\n\n"
+            "Sugerencia: investigá primero los datos en este mismo hilo y volvé a pedir el gráfico."
+        )
+        return answer, [], cost, "analista"
+
+    spec = data.get("chart") or {}
+    title = (data.get("title") or "Gráfico").strip()
+    try:
+        svg = render_chart_svg(spec)
+    except Exception as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"No se pudo dibujar el gráfico: {exc}")
+
+    # Guardar como imagen del proyecto (URL de capacidad, igual que las del editor)
+    images_dir = settings.upload_path / project_id / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    name = f"chart-{_uuid.uuid4().hex[:12]}.svg"
+    (images_dir / name).write_text(svg, encoding="utf-8")
+    url = f"/api/v1/projects/{project_id}/images/{name}"
+
+    table = spec_to_markdown_table(spec)
+    parts = [f"### {title}", "", f"![{title}]({url})", ""]
+    if data.get("analysis_md"):
+        parts += [data["analysis_md"].strip(), ""]
+    if table:
+        parts += ["<details><summary>Datos del gráfico</summary>", "", table, "", "</details>", ""]
+    if data.get("fuente_md"):
+        parts.append(f"*{data['fuente_md'].strip()}*")
+    return "\n".join(parts).strip(), [], cost, "analista"
+
+
 async def _project_grounding(db: AsyncSession, project_id: str, query: str) -> str:
     from ...services.rag.retriever import format_citation, search_chunks
 
@@ -603,8 +701,14 @@ async def research(
 
     citations: list[dict] = []
     cost_usd = 0.0
+    engine_used = payload.engine
 
-    if payload.engine == "perplexity":
+    # ── Orquestador: pedido de gráfico/visualización → analista GPT ──
+    if _CHART_INTENT.search(payload.query):
+        answer, citations, cost_usd, engine_used = await _chart_task(
+            payload.query, history_block, context_block, project_id
+        )
+    elif payload.engine == "perplexity":
         if not settings.perplexity_enabled:
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -672,7 +776,7 @@ async def research(
         conversation_id=conversation.id,
         role="assistant",
         content=answer,
-        tool_calls={"citations": unique_citations, "engine": payload.engine},
+        tool_calls={"citations": unique_citations, "engine": engine_used},
         cost_usd=cost_usd or None,
     ))
     conversation.updated_at = datetime.now(timezone.utc)
@@ -681,12 +785,12 @@ async def research(
         db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
         action="agent.research", project_id=project_id, entity_type="research",
         entity_id=conversation.id,
-        detail={"engine": payload.engine, "query": payload.query[:120]},
+        detail={"engine": engine_used, "query": payload.query[:120]},
         ip=client_ip(request),
     )
     return {
         "answer": answer,
         "citations": unique_citations,
-        "engine": payload.engine,
+        "engine": engine_used,
         "conversation_id": conversation.id,
     }

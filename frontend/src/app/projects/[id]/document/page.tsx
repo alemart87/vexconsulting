@@ -44,6 +44,12 @@ function cleanMd(text: string): string {
   return t;
 }
 
+function engineBadge(engine?: string): { label: string; cls: string } {
+  if (engine === "perplexity") return { label: "VEX Consulting IA", cls: "badge-primary" };
+  if (engine === "analista") return { label: "Analista (gráficos)", cls: "badge-cyan" };
+  return { label: "IA tradicional", cls: "badge-neutral" };
+}
+
 const AI_ACTIONS = [
   { label: "▸ Continuar", instruction: "" },
   {
@@ -245,10 +251,13 @@ export default function DocumentPage() {
     const info = editorRef.current?.getContextInfo();
     setAiLoading(true);
     setPanelError("");
+    const isChart = /gr[aá]fic|chart|visualiz|diagrama|barras|torta|plot/i.test(query);
     setAiLoadingLabel(
-      engine === "perplexity"
-        ? "VEX Consulting IA investigando… (hasta 1 minuto)"
-        : "IA tradicional investigando… (hasta 1 minuto)"
+      isChart
+        ? "El analista está preparando el gráfico con los datos del hilo…"
+        : engine === "perplexity"
+          ? "VEX Consulting IA investigando… (hasta 1 minuto)"
+          : "IA tradicional investigando… (hasta 1 minuto)"
     );
     setThread((t) => [...t, { role: "user", content: query }]);
     setAiQuery("");
@@ -443,8 +452,8 @@ export default function DocumentPage() {
                     ) : (
                       <div key={i} className="rounded-lg bg-brand-bg p-3 animate-pop">
                         <div className="flex items-center gap-1.5 mb-1.5">
-                          <span className={t.engine === "perplexity" ? "badge-primary" : "badge-neutral"}>
-                            {t.engine === "perplexity" ? "VEX Consulting IA" : "IA tradicional"}
+                          <span className={engineBadge(t.engine).cls}>
+                            {engineBadge(t.engine).label}
                           </span>
                           {t.citations && t.citations.length > 0 && (
                             <span className="text-[10px] text-brand-slate">
@@ -495,7 +504,7 @@ export default function DocumentPage() {
                         rows={2}
                         placeholder={
                           thread.length
-                            ? "Continuá el hilo: «profundizá en Paraguay», «desagregá por año», «verificá esa cifra»…"
+                            ? "Continuá: «profundizá en Paraguay», «creame un gráfico de barras con las tarifas por país», «verificá esa cifra»…"
                             : "¿Qué investigamos? Ej.: «migración de voz a canales digitales en BPO, últimos 10 años»"
                         }
                         value={aiQuery}
@@ -597,8 +606,8 @@ export default function DocumentPage() {
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center gap-2 px-6 py-3.5 border-b border-brand-border">
-                  <span className={reader.engine === "perplexity" ? "badge-primary" : "badge-neutral"}>
-                    {reader.engine === "perplexity" ? "VEX Consulting IA" : "IA tradicional"}
+                  <span className={engineBadge(reader.engine).cls}>
+                    {engineBadge(reader.engine).label}
                   </span>
                   {reader.citations && reader.citations.length > 0 && (
                     <span className="text-xs text-brand-slate">
