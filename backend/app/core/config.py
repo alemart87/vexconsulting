@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     agent_model: str = "gpt-5.4"
     agent_reasoning_effort: str = "medium"
     agent_reasoning_summary: str = "auto"
-    agent_max_history: int = 20
+    agent_max_history: int = 30
     agent_max_tool_turns: int = 30
 
     # Precios (USD por 1M tokens); defaults de gpt-5.4

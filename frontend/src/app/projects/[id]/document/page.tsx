@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import AgentChat, { Proposal } from "@/components/agent/AgentChat";
 import MarkdownEditor, { EditorHandle } from "@/components/editor/MarkdownEditor";
 import { apiFetch, formatDate, getUser } from "@/lib/api";
@@ -55,7 +57,6 @@ export default function DocumentPage() {
   const [panelTab, setPanelTab] = useState<"investigador" | "chat">("investigador");
   const [aiQuery, setAiQuery] = useState("");
   const [aiSuggestion, setAiSuggestion] = useState("");
-  const [aiCitations, setAiCitations] = useState<{ url: string; title: string }[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiLoadingLabel, setAiLoadingLabel] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -64,9 +65,42 @@ export default function DocumentPage() {
     perplexity: false,
   });
 
+  // ---- Hilo del investigador (memoria persistente) ----
+  interface ResearchTurn {
+    role: "user" | "assistant";
+    content: string;
+    citations?: { url: string; title: string }[];
+    engine?: string;
+  }
+  const [convId, setConvId] = useState<string | null>(null);
+  const [thread, setThread] = useState<ResearchTurn[]>([]);
+  const [lastEngine, setLastEngine] = useState<"perplexity" | "openai">("perplexity");
+  const threadEndRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     apiFetch<any>("/api/v1/agent/capabilities").then(setCapabilities).catch(() => {});
-  }, []);
+    // Retomar el último hilo de investigación del proyecto
+    apiFetch<any[]>(`/api/v1/projects/${params.id}/agent/conversations?agent_type=investigacion`)
+      .then(async (convs) => {
+        if (!convs.length) return;
+        const latest = convs[0];
+        setConvId(latest.id);
+        const msgs = await apiFetch<any[]>(`/api/v1/agent/conversations/${latest.id}/messages`);
+        setThread(
+          msgs.map((m) => ({
+            role: m.role,
+            content: m.content,
+            citations: m.tool_calls?.citations,
+            engine: m.tool_calls?.engine,
+          }))
+        );
+      })
+      .catch(() => {});
+  }, [params.id]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [thread, aiLoading]);
 
   const canWrite =
     project?.my_permission === "write" || project?.my_permission === "admin";
@@ -149,7 +183,6 @@ export default function DocumentPage() {
     setAiLoading(true);
     setAiLoadingLabel("Redactando con el documento y las fuentes…");
     setAiSuggestion("");
-    setAiCitations([]);
     try {
       const res = await apiFetch<{ suggestion: string }>(
         `/api/v1/projects/${params.id}/agent/suggest`,
@@ -169,30 +202,56 @@ export default function DocumentPage() {
     }
   };
 
-  const requestResearch = async (engine: "openai" | "perplexity") => {
-    const query = aiQuery.trim();
+  const requestResearch = async (
+    engine: "openai" | "perplexity",
+    queryOverride?: string
+  ) => {
+    const query = (queryOverride ?? aiQuery).trim();
     if (!query) return;
     const info = editorRef.current?.getContextInfo();
     setAiLoading(true);
+    setLastEngine(engine);
     setAiLoadingLabel(
       engine === "perplexity"
-        ? "Investigando con Perplexity Sonar…"
-        : "Investigando en la web (OpenAI web_search)… hasta 1 minuto"
+        ? "VEX Consulting IA investigando…"
+        : "IA tradicional investigando en la web… hasta 1 minuto"
     );
-    setAiSuggestion("");
-    setAiCitations([]);
+    setThread((t) => [...t, { role: "user", content: query }]);
+    setAiQuery("");
     try {
       const res = await apiFetch<any>(`/api/v1/projects/${params.id}/agent/research`, {
         method: "POST",
-        body: JSON.stringify({ query, context_text: info?.context || undefined, engine }),
+        body: JSON.stringify({
+          query,
+          context_text: info?.context || undefined,
+          engine,
+          conversation_id: convId || undefined,
+        }),
       });
-      setAiSuggestion(res.answer);
-      setAiCitations(res.citations || []);
+      setConvId(res.conversation_id);
+      setThread((t) => [
+        ...t,
+        { role: "assistant", content: res.answer, citations: res.citations, engine: res.engine },
+      ]);
     } catch (e: any) {
+      setThread((t) => t.slice(0, -1));
       setStatus(`Investigación: ${e.message}`);
     } finally {
       setAiLoading(false);
     }
+  };
+
+  const deepen = () =>
+    requestResearch(
+      lastEngine,
+      "Profundizá la investigación anterior: desagregá por país y por año, agregá series " +
+        "temporales si existen, verificá las cifras con fuentes adicionales e indicá " +
+        "discrepancias entre fuentes."
+    );
+
+  const newThread = () => {
+    setConvId(null);
+    setThread([]);
   };
 
   if (!doc) return <div className="card p-10 text-center text-brand-slate">Cargando…</div>;
@@ -292,123 +351,153 @@ export default function DocumentPage() {
             {panelTab === "investigador" ? (
               <div className="p-3 space-y-2.5">
                 {editable && (
-                  <>
-                    <div className="flex gap-1 flex-wrap">
-                      {AI_ACTIONS.map((a) => (
-                        <button
-                          key={a.label}
-                          className="btn-secondary !px-2.5 !py-1 text-[11px]"
-                          disabled={aiLoading}
-                          onClick={() => requestSuggestion(a.instruction)}
-                          title="Actúa sobre la selección o el texto anterior al cursor"
-                        >
-                          {a.label}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      className="input !py-2 text-xs resize-none"
-                      rows={2}
-                      placeholder="¿Qué investigamos? Ej.: «tarifas BPO nearshore LatAm 2026 con fuentes»"
-                      value={aiQuery}
-                      onChange={(e) => setAiQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey && aiQuery.trim()) {
-                          e.preventDefault();
-                          requestResearch("openai");
-                        }
-                      }}
-                      disabled={aiLoading}
-                    />
-                    <div className="flex gap-1.5">
+                  <div className="flex gap-1 flex-wrap items-center">
+                    {AI_ACTIONS.map((a) => (
                       <button
-                        className="btn-primary !py-1.5 text-xs flex-1"
-                        disabled={aiLoading || !aiQuery.trim()}
-                        onClick={() => requestResearch("openai")}
+                        key={a.label}
+                        className="btn-secondary !px-2.5 !py-1 text-[11px]"
+                        disabled={aiLoading}
+                        onClick={() => requestSuggestion(a.instruction)}
+                        title="Actúa sobre la selección o el texto anterior al cursor"
                       >
-                        🌐 Investigar en la web
+                        {a.label}
                       </button>
-                      {capabilities.perplexity && (
-                        <button
-                          className="btn-primary !py-1.5 text-xs flex-1 !bg-brand-purple hover:!bg-brand-ink"
-                          disabled={aiLoading || !aiQuery.trim()}
-                          onClick={() => requestResearch("perplexity")}
-                        >
-                          🔍 Perplexity
-                        </button>
-                      )}
+                    ))}
+                    {thread.length > 0 && (
                       <button
-                        className="btn-secondary !py-1.5 text-xs"
-                        disabled={aiLoading || !aiQuery.trim()}
-                        onClick={() => requestSuggestion(aiQuery)}
-                        title="Redacta con el documento y las fuentes internas, sin buscar en la web"
+                        className="btn-ghost !px-2 !py-1 text-[11px] ml-auto"
+                        onClick={newThread}
+                        title="Empezar un hilo de investigación nuevo (el actual queda guardado)"
                       >
-                        ✍
+                        🆕 Nuevo hilo
                       </button>
-                    </div>
-                  </>
-                )}
-
-                {aiLoading && (
-                  <div className="shimmer-text text-sm font-semibold py-1">{aiLoadingLabel}</div>
+                    )}
+                  </div>
                 )}
 
                 {aiSuggestion && !aiLoading && (
-                  <div className="animate-pop space-y-2">
-                    <pre className="text-xs whitespace-pre-wrap bg-brand-bg-soft rounded p-2.5 max-h-72 overflow-y-auto font-sans">
+                  <div className="animate-pop space-y-1.5 rounded-md border border-brand-cyan/40 p-2">
+                    <pre className="text-xs whitespace-pre-wrap bg-brand-bg-soft rounded p-2 max-h-48 overflow-y-auto font-sans">
                       {aiSuggestion}
                     </pre>
-                    {aiCitations.length > 0 && (
-                      <div className="rounded-md border border-brand-border p-2">
-                        <div className="text-[10px] font-semibold uppercase tracking-wider2 text-brand-slate mb-1">
-                          Fuentes web ({aiCitations.length})
-                        </div>
-                        <ul className="space-y-0.5 max-h-24 overflow-y-auto">
-                          {aiCitations.map((c, i) => (
-                            <li key={i} className="text-[11px] truncate">
-                              <a
-                                href={c.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-brand-cyan underline"
-                              >
-                                {c.title || c.url}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
                     <div className="flex gap-1.5">
                       <button
-                        className="btn-primary !py-1.5 text-xs flex-1"
+                        className="btn-primary !py-1 text-[11px] flex-1"
                         onClick={() => {
                           insertText(aiSuggestion);
                           setAiSuggestion("");
-                          setAiCitations([]);
                         }}
                       >
                         ⤵ Insertar en el cursor
                       </button>
-                      <button
-                        className="btn-ghost text-xs"
-                        onClick={() => {
-                          setAiSuggestion("");
-                          setAiCitations([]);
-                        }}
-                      >
+                      <button className="btn-ghost text-[11px]" onClick={() => setAiSuggestion("")}>
                         Descartar
                       </button>
                     </div>
                   </div>
                 )}
 
-                {!aiSuggestion && !aiLoading && (
-                  <p className="text-[11px] text-brand-slate leading-relaxed">
-                    {editable
-                      ? "Los botones rápidos actúan sobre tu selección. «Investigar en la web» busca en tiempo real con citas verificables y todo se inserta donde está el cursor."
-                      : "Tenés permiso de lectura: podés usar el chat del proyecto."}
-                  </p>
+                {/* Hilo de investigación con memoria */}
+                <div className="max-h-[46vh] overflow-y-auto space-y-2.5 pr-1">
+                  {thread.length === 0 && !aiLoading && (
+                    <p className="text-[11px] text-brand-slate leading-relaxed py-2">
+                      Este es tu lienzo de investigación: el investigador experto recuerda el
+                      hilo completo (últimos 30 mensajes) — podés pedir más profundidad hasta
+                      llegar al resultado que buscás, y cada hallazgo se inserta en el
+                      documento con sus fuentes.
+                    </p>
+                  )}
+                  {thread.map((t, i) =>
+                    t.role === "user" ? (
+                      <div key={i} className="flex justify-end">
+                        <div className="max-w-[90%] rounded-lg bg-brand-primary text-white px-3 py-1.5 text-xs">
+                          {t.content}
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={i} className="rounded-lg bg-brand-bg p-2.5 animate-pop">
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <span className={t.engine === "perplexity" ? "badge-primary" : "badge-neutral"}>
+                            {t.engine === "perplexity" ? "VEX Consulting IA" : "IA tradicional"}
+                          </span>
+                          {t.citations && t.citations.length > 0 && (
+                            <span className="text-[10px] text-brand-slate">
+                              {t.citations.length} fuentes
+                            </span>
+                          )}
+                        </div>
+                        <div className="prose-vex !text-xs max-h-64 overflow-y-auto [&_h1]:!text-sm [&_h2]:!text-sm [&_h3]:!text-xs">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{t.content}</ReactMarkdown>
+                        </div>
+                        {editable && (
+                          <div className="flex gap-1.5 mt-2">
+                            <button
+                              className="btn-primary !py-1 text-[11px] flex-1"
+                              onClick={() => insertText(t.content)}
+                            >
+                              ⤵ Insertar en el cursor
+                            </button>
+                            {i === thread.length - 1 && (
+                              <button
+                                className="btn-secondary !py-1 text-[11px]"
+                                disabled={aiLoading}
+                                onClick={deepen}
+                              >
+                                🔎 Profundizar
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  )}
+                  {aiLoading && (
+                    <div className="shimmer-text text-xs font-semibold py-1">{aiLoadingLabel}</div>
+                  )}
+                  <div ref={threadEndRef} />
+                </div>
+
+                {editable && (
+                  <>
+                    <textarea
+                      className="input !py-2 text-xs resize-none"
+                      rows={2}
+                      placeholder={
+                        thread.length
+                          ? "Seguí la investigación: pedí más detalle, otro corte, verificación…"
+                          : "¿Qué investigamos? Ej.: «tarifas BPO nearshore LatAm 2026 con fuentes»"
+                      }
+                      value={aiQuery}
+                      onChange={(e) => setAiQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey && aiQuery.trim()) {
+                          e.preventDefault();
+                          requestResearch(capabilities.perplexity ? "perplexity" : "openai");
+                        }
+                      }}
+                      disabled={aiLoading}
+                    />
+                    <div className="flex gap-1.5">
+                      {capabilities.perplexity && (
+                        <button
+                          className="btn-primary !py-1.5 text-xs flex-1"
+                          disabled={aiLoading || !aiQuery.trim()}
+                          onClick={() => requestResearch("perplexity")}
+                          title="Motor principal de investigación de VEX Consulting"
+                        >
+                          🔬 VEX Consulting IA
+                        </button>
+                      )}
+                      <button
+                        className={`${capabilities.perplexity ? "btn-secondary" : "btn-primary"} !py-1.5 text-xs flex-1`}
+                        disabled={aiLoading || !aiQuery.trim()}
+                        onClick={() => requestResearch("openai")}
+                        title="Motor alternativo (OpenAI con búsqueda web)"
+                      >
+                        IA tradicional
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             ) : (

@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Brand from "@/components/Brand";
 import AgentChat from "@/components/agent/AgentChat";
-import { apiFetch, clearSession, formatDate, getToken } from "@/lib/api";
+import { apiFetch, clearSession, downloadFile, formatDate, getToken } from "@/lib/api";
 
 export default function ViewerPage() {
   const params = useParams<{ id: string }>();
@@ -39,7 +39,10 @@ export default function ViewerPage() {
         await new Promise((r) => setTimeout(r, 2000));
         const st = await apiFetch<any>(`/api/v1/projects/${params.id}/exports/${job.id}`);
         if (st.status === "done") {
-          window.location.href = `/api/v1/projects/${params.id}/exports/${job.id}/download`;
+          await downloadFile(
+            `/api/v1/projects/${params.id}/exports/${job.id}/download`,
+            `${project?.name ?? "informe"}.${format}`
+          );
           break;
         }
         if (st.status === "failed") {

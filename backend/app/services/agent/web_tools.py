@@ -15,7 +15,7 @@ def make_perplexity_tool(function_tool):
         verificables. Formulá la consulta específica y con contexto."""
         from ...api.v1.agent import _perplexity_research
 
-        answer, citations = await _perplexity_research(consulta)
+        answer, citations, _cost = await _perplexity_research(consulta)
         return {"respuesta": answer, "citas": citations[:12]}
 
     return investigar_perplexity

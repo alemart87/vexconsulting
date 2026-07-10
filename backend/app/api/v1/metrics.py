@@ -86,12 +86,58 @@ async def project_metrics(
         .limit(15)
     )
 
+    # Serie temporal (últimos 45 días): palabras y ediciones por día por autor,
+    # más consultas a la IA por día. Agregación en Python (pocas filas).
+    from collections import defaultdict
+    from datetime import datetime, timedelta, timezone
+
+    since = datetime.now(timezone.utc) - timedelta(days=45)
+    ver_rows = await db.execute(
+        select(
+            DocumentVersion.created_at,
+            DocumentVersion.author_name,
+            DocumentVersion.words_added,
+        ).where(
+            DocumentVersion.project_id == project_id,
+            DocumentVersion.created_at >= since,
+        )
+    )
+    daily: dict[str, dict] = defaultdict(lambda: {"palabras": 0, "ediciones": 0, "consultas_ia": 0})
+    per_author_daily: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for created_at, author, words in ver_rows:
+        day = created_at.strftime("%d/%m")
+        daily[day]["palabras"] += int(words or 0)
+        daily[day]["ediciones"] += 1
+        per_author_daily[day][author or "—"] += int(words or 0)
+
+    msg_rows = await db.execute(
+        select(Message.created_at)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Conversation.project_id == project_id,
+            Message.role == "user",
+            Message.created_at >= since,
+        )
+    )
+    for (created_at,) in msg_rows:
+        daily[created_at.strftime("%d/%m")]["consultas_ia"] += 1
+
+    def _sortkey(day: str) -> tuple:
+        d, m = day.split("/")
+        return (int(m), int(d))
+
+    timeline = [
+        {"dia": day, **values, "por_autor": dict(per_author_daily.get(day, {}))}
+        for day, values in sorted(daily.items(), key=lambda kv: _sortkey(kv[0]))
+    ]
+
     return {
         "aportes": aportes,
         "fuentes_por_usuario": fuentes_por_usuario,
         "totales": {k: int(v or 0) for k, v in totals.items()},
         "costo_ia_usd": float(costo or 0),
         "actividad": [{"action": a, "count": int(c)} for a, c in actividad],
+        "timeline": timeline,
     }
 
 

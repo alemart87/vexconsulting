@@ -2,7 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { apiFetch, formatDate } from "@/lib/api";
+
+const BRAND = { rojo: "#E6332A", cyan: "#00B2BF", purpura: "#662483", naranja: "#F39200", ink: "#0F1116" };
 
 export default function MetricsPage() {
   const params = useParams<{ id: string }>();
@@ -37,6 +51,53 @@ export default function MetricsPage() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Gráficos de análisis */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="card p-5">
+          <h2 className="label mb-3">Actividad por día (palabras · ediciones · IA)</h2>
+          {data.timeline?.length ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={data.timeline} margin={{ top: 5, right: 10, bottom: 0, left: -15 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line yAxisId="left" type="monotone" dataKey="palabras" name="Palabras agregadas"
+                  stroke={BRAND.rojo} strokeWidth={2.5} dot={{ r: 3 }} />
+                <Line yAxisId="right" type="monotone" dataKey="ediciones" name="Ediciones"
+                  stroke={BRAND.cyan} strokeWidth={2} dot={{ r: 3 }} />
+                <Line yAxisId="right" type="monotone" dataKey="consultas_ia" name="Consultas IA"
+                  stroke={BRAND.purpura} strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-brand-slate py-10 text-center">Sin actividad reciente.</p>
+          )}
+        </div>
+
+        <div className="card p-5">
+          <h2 className="label mb-3">Aporte por consultor (palabras y ediciones)</h2>
+          {data.aportes?.length ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={data.aportes} margin={{ top: 5, right: 10, bottom: 0, left: -15 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="author_name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="palabras_agregadas" name="Palabras +" fill={BRAND.rojo} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="palabras_quitadas" name="Palabras −" fill={BRAND.naranja} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="ediciones" name="Ediciones" fill={BRAND.cyan} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-brand-slate py-10 text-center">Sin ediciones todavía.</p>
+          )}
+        </div>
       </div>
 
       <div className="card overflow-hidden">

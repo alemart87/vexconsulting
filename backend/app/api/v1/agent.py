@@ -57,7 +57,8 @@ class SuggestRequest(BaseModel):
 class ResearchRequest(BaseModel):
     query: str = Field(min_length=3, max_length=2000)
     context_text: str | None = Field(default=None, max_length=12000)
-    engine: str = "openai"  # openai (web_search) | perplexity (sonar)
+    engine: str = "perplexity"  # perplexity («VEX Consulting IA») | openai («IA tradicional»)
+    conversation_id: str | None = None  # hilo de investigación con memoria (30 mensajes)
 
 
 @router.get("/agent/roles")
@@ -78,10 +79,14 @@ async def get_capabilities() -> dict:
 @router.get("/projects/{project_id}/agent/conversations")
 async def list_conversations(
     project_id: str,
+    agent_type: str = "acompanante",
     access: ProjectAccess = Depends(require_project_read),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
-    agent_type = "visualizador" if access.user.is_visualizador else "acompanante"
+    if access.user.is_visualizador:
+        agent_type = "visualizador"
+    elif agent_type not in ("acompanante", "investigacion"):
+        agent_type = "acompanante"
     result = await db.execute(
         select(Conversation)
         .where(
@@ -348,17 +353,71 @@ async def suggest_text(
 
 
 _RESEARCH_SYSTEM = (
-    "Sos un investigador de mercado senior redactando para un informe de consultoría "
-    "en español, registro institucional sobrio. Investigá la consulta con las "
-    "herramientas de búsqueda disponibles y con las fuentes internas provistas. "
-    "Respondé SOLO con el bloque de texto en Markdown listo para insertar en el "
-    "informe: hallazgos con cifras concretas, cada cifra con su fuente (enlace "
-    "markdown para fuentes web; corchetes para fuentes internas del proyecto). "
-    "Cerrá con una lista «Fuentes:» con los enlaces usados. Sin preámbulos."
+    "Sos «VEX Consulting IA», el investigador experto de una consultora de "
+    "investigación de mercado. Redactás en español, registro institucional sobrio, "
+    "con método científico: hipótesis, evidencia con fuente, distinción entre hecho "
+    "y estimación. Investigá la consulta con las herramientas de búsqueda y con las "
+    "fuentes internas provistas; si hay historial de la investigación, CONSTRUÍ sobre "
+    "él (profundizá, desagregá, verificá — no repitas lo ya dicho). Respondé SOLO con "
+    "el bloque en Markdown listo para insertar en el informe: hallazgos con cifras "
+    "concretas, cada cifra con su referencia numerada [n] correspondiente a los "
+    "resultados de búsqueda (no inventes números) o con la cita entre corchetes para "
+    "fuentes internas. NO agregues una lista de fuentes al final: el sistema la "
+    "agrega automáticamente. Sin preámbulos."
 )
 
 
-async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict]]:
+def _linkify_citations(answer: str, citations: list[dict]) -> str:
+    """Convierte las referencias [n] en enlaces y agrega la lista de fuentes
+    formateada con títulos (legible en el documento, la vista previa y el export)."""
+    import re as _re
+
+    if citations:
+        def _link(match: _re.Match) -> str:
+            n = int(match.group(1))
+            if 1 <= n <= len(citations):
+                return f"[[{n}]]({citations[n - 1].get('url', '')})"
+            return match.group(0)
+
+        answer = _re.sub(r"\[(\d+)\](?!\()", _link, answer)
+
+        # Quitar una lista final de fuentes cruda si el modelo la agregó igual
+        answer = _re.sub(r"\n+\**Fuentes:?\**\s*\n(?:\s*(?:\d+\.\s*)?https?://\S+\s*\n?)+\s*$", "", answer)
+
+        lines = ["\n\n**Fuentes consultadas:**\n"]
+        for i, c in enumerate(citations, start=1):
+            title = (c.get("title") or c.get("url") or "").strip()
+            url = c.get("url") or ""
+            if title == url:
+                try:
+                    from urllib.parse import urlparse
+
+                    title = urlparse(url).netloc or url
+                except Exception:
+                    pass
+            lines.append(f"{i}. [{title}]({url})")
+        answer = answer.rstrip() + "\n".join(lines)
+    return answer
+
+
+async def _load_research_history(db: AsyncSession, conversation_id: str) -> str:
+    """Últimos N mensajes del hilo como transcript para dar continuidad."""
+    rows = await db.execute(
+        select(Message).where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc()).limit(settings.agent_max_history)
+    )
+    messages = list(reversed(rows.scalars().all()))
+    if not messages:
+        return ""
+    parts = ["\n\nHISTORIAL DE LA INVESTIGACIÓN (construí sobre esto, no lo repitas):"]
+    for m in messages:
+        who = "Consultor" if m.role == "user" else "VEX Consulting IA"
+        parts.append(f"{who}: {(m.content or '')[:1500]}")
+    transcript = "\n\n".join(parts)
+    return transcript[-14000:]
+
+
+async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float]:
     """Investigación vía el Agent API de Perplexity (POST /v1/agent, multi-proveedor,
     tool web_search nativa). Fallback al /chat/completions clásico si no está
     disponible para la cuenta."""
@@ -406,7 +465,7 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict]]:
             for sr in data.get("search_results") or []:
                 if isinstance(sr, dict) and sr.get("url"):
                     citations.append({"url": sr["url"], "title": sr.get("title") or sr["url"]})
-            return answer, citations
+            return answer, citations, 0.0
 
         if resp.status_code == 400:
             detail = ""
@@ -441,7 +500,12 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict]]:
                 if r.get("url"):
                     citations.append({"url": r["url"], "title": r.get("title") or r["url"]})
     answer = "\n".join(p for p in parts if p).strip() or (data.get("output_text") or "").strip()
-    return answer, citations
+    cost = 0.0
+    try:
+        cost = float(((data.get("usage") or {}).get("cost") or {}).get("total_cost") or 0)
+    except Exception:
+        pass
+    return answer, citations, cost
 
 
 async def _project_grounding(db: AsyncSession, project_id: str, query: str) -> str:
@@ -466,17 +530,44 @@ async def research(
     access: ProjectAccess = Depends(require_project_write),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Agente de investigación del editor: búsqueda web real (OpenAI web_search
-    o Perplexity Sonar) + fuentes internas del proyecto, con citas verificables."""
+    """«VEX Consulting IA»: investigador experto con memoria de hilo (30 mensajes).
+    Motores: Perplexity Agent API (principal) u OpenAI web_search (tradicional).
+    Cada intercambio se persiste en una conversación agent_type='investigacion'."""
+    # Hilo de investigación: cargar o crear
+    conversation: Conversation | None = None
+    if payload.conversation_id:
+        conversation = await db.get(Conversation, payload.conversation_id)
+        if (
+            not conversation
+            or conversation.project_id != project_id
+            or conversation.user_id != access.user.id
+            or conversation.agent_type != "investigacion"
+        ):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Hilo de investigación no encontrado")
+    if conversation is None:
+        conversation = Conversation(
+            user_id=access.user.id,
+            project_id=project_id,
+            agent_type="investigacion",
+            role_slug=payload.engine,
+            title=payload.query[:60],
+        )
+        db.add(conversation)
+        await db.flush()
+
+    history_block = await _load_research_history(db, conversation.id)
     grounding = await _project_grounding(db, project_id, payload.query)
     context_block = (
         f"\n\nCONTEXTO DEL DOCUMENTO EN EDICIÓN:\n{payload.context_text[-4000:]}"
         if payload.context_text
         else ""
     )
-    user_prompt = f"CONSULTA DE INVESTIGACIÓN: {payload.query}{context_block}{grounding}"
+    user_prompt = (
+        f"CONSULTA DE INVESTIGACIÓN: {payload.query}{history_block}{context_block}{grounding}"
+    )
 
     citations: list[dict] = []
+    cost_usd = 0.0
 
     if payload.engine == "perplexity":
         if not settings.perplexity_enabled:
@@ -485,11 +576,13 @@ async def research(
                 "Perplexity no está configurado: cargá PERPLEXITY_API_KEY en el .env "
                 "(la key se genera en perplexity.ai/settings/api).",
             )
-        answer, citations = await _perplexity_research(user_prompt)
+        answer, citations, cost_usd = await _perplexity_research(user_prompt)
     else:
         if not settings.openai_api_key:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
         from openai import AsyncOpenAI
+
+        from ...services.agent.pricing import compute_cost_usd
 
         client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180)
         resp = await client.responses.create(
@@ -499,6 +592,12 @@ async def research(
             input=user_prompt,
         )
         answer = (getattr(resp, "output_text", "") or "").strip()
+        usage = getattr(resp, "usage", None)
+        if usage:
+            cost_usd = compute_cost_usd(
+                int(getattr(usage, "input_tokens", 0) or 0),
+                int(getattr(usage, "output_tokens", 0) or 0),
+            )
         # Extraer citas de las anotaciones url_citation del Responses API
         try:
             for item in getattr(resp, "output", []) or []:
@@ -528,10 +627,30 @@ async def research(
             seen.add(url)
             unique_citations.append(c)
 
+    # Referencias [n] → enlaces + lista de fuentes formateada con títulos
+    answer = _linkify_citations(answer, unique_citations)
+
+    # Persistir el intercambio en el hilo (memoria del investigador)
+    db.add(Message(conversation_id=conversation.id, role="user", content=payload.query))
+    db.add(Message(
+        conversation_id=conversation.id,
+        role="assistant",
+        content=answer,
+        tool_calls={"citations": unique_citations, "engine": payload.engine},
+        cost_usd=cost_usd or None,
+    ))
+    conversation.updated_at = datetime.now(timezone.utc)
+
     await log_action(
         db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
         action="agent.research", project_id=project_id, entity_type="research",
+        entity_id=conversation.id,
         detail={"engine": payload.engine, "query": payload.query[:120]},
         ip=client_ip(request),
     )
-    return {"answer": answer, "citations": unique_citations, "engine": payload.engine}
+    return {
+        "answer": answer,
+        "citations": unique_citations,
+        "engine": payload.engine,
+        "conversation_id": conversation.id,
+    }

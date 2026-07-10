@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { apiFetch, formatDate } from "@/lib/api";
+import { apiFetch, downloadFile, formatDate } from "@/lib/api";
 import { useProject } from "@/components/ProjectContext";
 
 export default function ProjectOverview() {
@@ -25,7 +25,10 @@ export default function ProjectOverview() {
         await new Promise((r) => setTimeout(r, 2000));
         const st = await apiFetch<any>(`/api/v1/projects/${params.id}/exports/${job.id}`);
         if (st.status === "done") {
-          window.location.href = `/api/v1/projects/${params.id}/exports/${job.id}/download`;
+          await downloadFile(
+            `/api/v1/projects/${params.id}/exports/${job.id}/download`,
+            `${project?.name ?? "documento"}.${format}`
+          );
           break;
         }
         if (st.status === "failed") {
