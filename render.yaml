@@ -1,0 +1,46 @@
+# VEX Consulting — Render Blueprint
+#
+# La base PostgreSQL se crea aparte en el dashboard de Render (plan Starter o
+# superior para producción; el plan Free expira a los 30 días). Pegar su
+# Internal Database URL en la variable DATABASE_URL del servicio web.
+# pgvector: el lifespan ejecuta CREATE EXTENSION IF NOT EXISTS vector.
+
+services:
+  - type: web
+    name: vexconsulting
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: vexdata
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: SUPERADMIN_EMAIL
+        sync: false
+      - key: SUPERADMIN_PASSWORD
+        sync: false
+      - key: SUPERADMIN_NAME
+        value: Administrador VEX
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: AGENT_MODEL
+        value: gpt-5.4
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: EXPORT_DIR
+        value: /var/data/exports
+      - key: BACKEND_URL
+        value: http://127.0.0.1:8000
+      - key: JWT_ACCESS_EXPIRE_MINUTES
+        value: "60"
+      - key: LOG_LEVEL
+        value: INFO

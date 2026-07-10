@@ -1,0 +1,164 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Barlow+Condensed:wght@500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Paleta oficial Voicenter */
+  --vc-primary: #e6332a;
+  --vc-primary-dark: #b81f18;
+  --vc-cyan: #00b2bf;
+  --vc-purple: #662483;
+  --vc-orange: #f39200;
+  --vc-ink: #0f1116;
+  --vc-bg: #f6f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  font-family: "Manrope", system-ui, "Segoe UI", Arial, sans-serif;
+  background-color: var(--vc-bg);
+  color: var(--vc-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: "Barlow Condensed", Impact, "Arial Narrow", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+/* ========= Componentes corporativos reutilizables ========= */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md font-semibold tracking-wide transition-all duration-150;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn px-5 py-2.5 text-sm bg-brand-primary text-white hover:bg-brand-primary-dark active:scale-[0.98] shadow-soft;
+  }
+  .btn-secondary {
+    @apply btn px-5 py-2.5 text-sm bg-white text-brand-ink border border-brand-border hover:border-brand-primary hover:text-brand-primary;
+  }
+  .btn-ghost {
+    @apply btn px-3 py-2 text-sm text-brand-slate hover:bg-brand-bg hover:text-brand-ink;
+  }
+  .btn-danger {
+    @apply btn px-4 py-2 text-sm bg-white text-brand-primary border border-brand-primary hover:bg-brand-primary hover:text-white;
+  }
+
+  .input {
+    @apply w-full px-3.5 py-2.5 text-sm bg-white border border-brand-border rounded-md;
+    @apply focus:outline-none focus:border-brand-primary focus:shadow-focus transition-shadow;
+    @apply placeholder:text-brand-mist;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-soft border border-brand-border;
+  }
+
+  .label {
+    @apply block text-xs font-semibold uppercase tracking-wider2 text-brand-slate mb-1.5;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider2 rounded;
+  }
+  .badge-primary {
+    @apply badge bg-brand-primary-light text-brand-primary-dark;
+  }
+  .badge-cyan {
+    @apply badge bg-brand-cyan/10 text-brand-cyan;
+  }
+  .badge-success {
+    @apply badge bg-emerald-50 text-emerald-700;
+  }
+  .badge-neutral {
+    @apply badge bg-brand-bg text-brand-slate;
+  }
+
+  .nav-link {
+    @apply px-3 py-2 rounded-md text-sm font-semibold tracking-wide transition-colors;
+    @apply text-brand-slate hover:bg-brand-bg hover:text-brand-ink;
+  }
+  .nav-link-active {
+    @apply nav-link bg-brand-primary text-white hover:bg-brand-primary-dark hover:text-white;
+  }
+}
+
+/* Animaciones */
+@keyframes vc-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes vc-pop {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.animate-fade { animation: vc-fade 0.12s ease-out; }
+.animate-pop { animation: vc-pop 0.15s ease-out; }
+
+@keyframes vc-shimmer {
+  0% { background-position: -180% 0; }
+  100% { background-position: 180% 0; }
+}
+.shimmer-text {
+  background: linear-gradient(90deg, #94a3b8 25%, #00b2bf 50%, #94a3b8 75%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: vc-shimmer 1.6s linear infinite;
+}
+.shimmer-bar {
+  background: linear-gradient(90deg, rgba(0,178,191,0.06) 25%, rgba(0,178,191,0.22) 50%, rgba(0,178,191,0.06) 75%);
+  background-size: 200% 100%;
+  animation: vc-shimmer 1.6s linear infinite;
+}
+
+/* ========= Editor TipTap y render de Markdown (prosa) ========= */
+.prose-vex {
+  @apply text-[15px] leading-relaxed text-brand-graphite max-w-none;
+}
+.prose-vex h1 { @apply text-3xl uppercase mt-8 mb-4 text-brand-ink; }
+.prose-vex h2 { @apply text-2xl uppercase mt-7 mb-3 text-brand-ink; }
+.prose-vex h3 { @apply text-xl mt-5 mb-2 text-brand-ink; }
+.prose-vex p { @apply my-3; }
+.prose-vex ul { @apply list-disc pl-6 my-3; }
+.prose-vex ol { @apply list-decimal pl-6 my-3; }
+.prose-vex li { @apply my-1; }
+.prose-vex blockquote { @apply border-l-4 border-brand-primary/40 pl-4 italic text-brand-slate my-4; }
+.prose-vex code { @apply bg-brand-bg px-1.5 py-0.5 rounded text-[13px] text-brand-purple; }
+.prose-vex pre { @apply bg-brand-ink text-white p-4 rounded-lg overflow-x-auto my-4; }
+.prose-vex pre code { @apply bg-transparent text-white p-0; }
+.prose-vex img { @apply max-w-full rounded-lg shadow-soft my-4; }
+.prose-vex a { @apply text-brand-cyan underline underline-offset-2; }
+.prose-vex hr { @apply my-6 border-brand-border; }
+.prose-vex table { @apply w-full border-collapse my-4 text-sm; }
+.prose-vex th { @apply bg-brand-bg border border-brand-border px-3 py-2 text-left font-semibold; }
+.prose-vex td { @apply border border-brand-border px-3 py-2; }
+
+.tiptap:focus { outline: none; }
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9ca3af;
+  pointer-events: none;
+  height: 0;
+}
+.tiptap .selectedCell { background: rgba(0, 178, 191, 0.08); }
+
+/* Diff de versiones */
+.diff-line-add { @apply bg-emerald-50 text-emerald-800 block px-2; }
+.diff-line-del { @apply bg-red-50 text-red-700 block px-2 line-through; }
+.diff-line-ctx { @apply text-brand-slate block px-2; }

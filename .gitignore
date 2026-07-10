@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+
+# Node / Next
+node_modules/
+.next/
+out/
+
+# Entorno y datos locales
+.env
+uploads/
+exports/
+smoke_test.db
+
+# SO / editor
+.DS_Store
+Thumbs.db
