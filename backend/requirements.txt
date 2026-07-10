@@ -12,8 +12,8 @@ bcrypt==4.0.1
 python-multipart==0.0.12
 httpx==0.27.2
 
-# Agentes
-openai-agents==0.17.4
+# Agentes (0.18.1+ requerido: compatible con openai 2.45 en el modelo de usage)
+openai-agents==0.18.1
 tiktoken==0.8.0
 
 # Extracción de fuentes (RAG)

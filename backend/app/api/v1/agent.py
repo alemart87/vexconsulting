@@ -57,7 +57,8 @@ class SuggestRequest(BaseModel):
 class ResearchRequest(BaseModel):
     query: str = Field(min_length=3, max_length=2000)
     context_text: str | None = Field(default=None, max_length=12000)
-    engine: str = "perplexity"  # perplexity («VEX Consulting IA») | openai («IA tradicional»)
+    engine: str = "vex"  # legado; el agente principal orquesta sus propias tools
+    rigor: str = "estandar"  # estandar | academico (prioriza fuentes revisadas por pares)
     conversation_id: str | None = None  # hilo de investigación con memoria (30 mensajes)
     attachment_source_ids: list[str] | None = None  # adjuntos de esta consulta (ya indexados)
 
@@ -952,13 +953,15 @@ async def research(
         message_id=placeholder.id,
         conversation_id=conversation.id,
         project_id=project_id,
+        project_name=access.project.name,
         query=payload.query,
         engine=payload.engine,
+        rigor=payload.rigor,
         context_text=payload.context_text,
         attachment_ids=payload.attachment_source_ids,
         user_info={
             "id": access.user.id, "email": access.user.email,
-            "role": access.user.role,
+            "role": access.user.role, "name": access.user.full_name,
         },
         ip=client_ip(request),
     ))
@@ -970,76 +973,45 @@ async def research(
 
 
 async def _run_research_job(
-    *, message_id: str, conversation_id: str, project_id: str, query: str,
-    engine: str, context_text: str | None, attachment_ids: list[str] | None,
-    user_info: dict, ip: str,
+    *, message_id: str, conversation_id: str, project_id: str, project_name: str,
+    query: str, engine: str, rigor: str, context_text: str | None,
+    attachment_ids: list[str] | None, user_info: dict, ip: str,
 ) -> None:
-    """Trabajo de investigación en segundo plano (sobrevive a la navegación)."""
+    """Trabajo de investigación en segundo plano (sobrevive a la navegación).
+
+    El agente principal (GPT) orquesta con sus tools: Perplexity (general o
+    académico), fuentes internas (RAG), documento maestro y generador de
+    gráficos — él decide qué usar en cada turno."""
     answer = ""
     unique_citations: list[dict] = []
     cost_usd = 0.0
-    engine_used = engine
+    engine_used = "vex"
     error: str | None = None
 
     try:
         async with session_scope() as db:
-            history_block = await _load_research_history(db, conversation_id)
+            history_block = await _load_research_history(db, conversation_id, generous=True)
             grounding = await _project_grounding(db, project_id, query, attachment_ids)
         context_block = (
             f"\n\nCONTEXTO DEL DOCUMENTO EN EDICIÓN:\n{context_text[-4000:]}"
             if context_text else ""
         )
-        user_prompt = f"CONSULTA DE INVESTIGACIÓN: {query}{history_block}{context_block}{grounding}"
+        user_prompt = (
+            f"PEDIDO DEL CONSULTOR: {query}{history_block}{context_block}{grounding}"
+        )
 
-        citations: list[dict] = []
-        # ── Orquestador: el enrutador decide si el turno pide investigación web
-        # nueva o análisis/síntesis/gráficos sobre el hilo existente ──
-        route = await _route_query(query, history_block)
-        if route == "analisis":
-            async with session_scope() as db:
-                history_full = await _load_research_history(db, conversation_id, generous=True)
-            answer, citations, cost_usd, engine_used = await _chart_task(
-                query, history_full, context_block, project_id
-            )
-        elif engine == "perplexity":
-            if not settings.perplexity_enabled:
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE,
-                    "Perplexity no está configurado: cargá PERPLEXITY_API_KEY en el .env.",
-                )
-            answer, citations, cost_usd = await _perplexity_research(user_prompt)
-        else:
-            if not settings.openai_api_key:
-                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
-            from openai import AsyncOpenAI
+        from ...services.agent.researcher import run_researcher
 
-            from ...services.agent.pricing import compute_cost_usd
-
-            client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180)
-            resp = await client.responses.create(
-                model=settings.agent_model,
-                tools=[{"type": "web_search"}],
-                instructions=_RESEARCH_SYSTEM,
-                input=user_prompt,
-            )
-            answer = (getattr(resp, "output_text", "") or "").strip()
-            usage = getattr(resp, "usage", None)
-            if usage:
-                cost_usd = compute_cost_usd(
-                    int(getattr(usage, "input_tokens", 0) or 0),
-                    int(getattr(usage, "output_tokens", 0) or 0),
-                )
-            try:
-                for item in getattr(resp, "output", []) or []:
-                    for content in getattr(item, "content", []) or []:
-                        for ann in getattr(content, "annotations", []) or []:
-                            if getattr(ann, "type", "") == "url_citation":
-                                citations.append({
-                                    "url": getattr(ann, "url", ""),
-                                    "title": getattr(ann, "title", "") or getattr(ann, "url", ""),
-                                })
-            except Exception:
-                pass
+        answer, citations, cost_usd = await run_researcher(
+            project_name=project_name,
+            project_id=project_id,
+            user_id=user_info["id"],
+            user_name=user_info.get("name") or "consultor",
+            prompt=user_prompt,
+            rigor=rigor,
+        )
+        if not answer:
+            raise RuntimeError("El investigador no produjo respuesta")
 
         # Fallback: enlaces markdown de la respuesta como citas
         if not citations and answer:

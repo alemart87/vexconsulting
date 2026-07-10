@@ -45,7 +45,8 @@ function cleanMd(text: string): string {
 }
 
 function engineBadge(engine?: string): { label: string; cls: string } {
-  if (engine === "perplexity") return { label: "VEX Consulting IA", cls: "badge-primary" };
+  if (engine === "vex" || engine === "perplexity")
+    return { label: "VEX Consulting IA", cls: "badge-primary" };
   if (engine === "analista") return { label: "Analista (gráficos)", cls: "badge-cyan" };
   return { label: "IA tradicional", cls: "badge-neutral" };
 }
@@ -106,7 +107,7 @@ export default function DocumentPage() {
   const [convId, setConvId] = useState<string | null>(null);
   const [convList, setConvList] = useState<{ id: string; title: string; updated_at: string }[]>([]);
   const [thread, setThread] = useState<ResearchTurn[]>([]);
-  const [engine, setEngine] = useState<"perplexity" | "openai">("perplexity");
+  const [rigor, setRigor] = useState<"estandar" | "academico">("estandar");
   const [reader, setReader] = useState<ResearchTurn | null>(null); // modo lectura amplio
   const [panelError, setPanelError] = useState("");
   const threadEndRef = useRef<HTMLDivElement>(null);
@@ -340,7 +341,8 @@ export default function DocumentPage() {
         body: JSON.stringify({
           query,
           context_text: info?.context || undefined,
-          engine,
+          engine: "vex",
+          rigor,
           conversation_id: convId || undefined,
           attachment_source_ids: attachments.length
             ? attachments.map((a) => a.source_id)
@@ -355,7 +357,7 @@ export default function DocumentPage() {
       watchIdsRef.current.add(res.message_id);
       setThread((t) => [
         ...t,
-        { id: res.message_id, role: "assistant", content: "", engine, status: "running" },
+        { id: res.message_id, role: "assistant", content: "", engine: "vex", status: "running" },
       ]);
       if (isNewConversation) loadConvList().catch(() => {});
     } catch (e: any) {
@@ -677,17 +679,15 @@ export default function DocumentPage() {
                       </button>
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-brand-slate">
-                      <label className="flex items-center gap-1.5">
-                        Motor:
+                      <label className="flex items-center gap-1.5" title="Académico: prioriza publicaciones revisadas por pares (papers, estudios) vía Perplexity search_mode=academic">
+                        Rigor:
                         <select
                           className="bg-transparent font-semibold text-brand-ink focus:outline-none cursor-pointer"
-                          value={engine}
-                          onChange={(e) => setEngine(e.target.value as any)}
+                          value={rigor}
+                          onChange={(e) => setRigor(e.target.value as any)}
                         >
-                          {capabilities.perplexity && (
-                            <option value="perplexity">VEX Consulting IA</option>
-                          )}
-                          <option value="openai">IA tradicional</option>
+                          <option value="estandar">Estándar</option>
+                          <option value="academico">🎓 Académico</option>
                         </select>
                       </label>
                       <div className="flex items-center gap-3">
