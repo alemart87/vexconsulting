@@ -96,32 +96,44 @@ export default function DocumentPage() {
     engine?: string;
   }
   const [convId, setConvId] = useState<string | null>(null);
+  const [convList, setConvList] = useState<{ id: string; title: string; updated_at: string }[]>([]);
   const [thread, setThread] = useState<ResearchTurn[]>([]);
   const [engine, setEngine] = useState<"perplexity" | "openai">("perplexity");
   const [reader, setReader] = useState<ResearchTurn | null>(null); // modo lectura amplio
   const [panelError, setPanelError] = useState("");
   const threadEndRef = useRef<HTMLDivElement>(null);
 
+  const loadThread = useCallback(async (conversationId: string) => {
+    setConvId(conversationId);
+    setPanelError("");
+    const msgs = await apiFetch<any[]>(`/api/v1/agent/conversations/${conversationId}/messages`);
+    setThread(
+      msgs.map((m) => ({
+        role: m.role,
+        content: m.role === "assistant" ? cleanMd(m.content) : m.content,
+        citations: m.tool_calls?.citations,
+        engine: m.tool_calls?.engine,
+      }))
+    );
+  }, []);
+
+  const loadConvList = useCallback(async (): Promise<any[]> => {
+    const convs = await apiFetch<any[]>(
+      `/api/v1/projects/${params.id}/agent/conversations?agent_type=investigacion`
+    );
+    setConvList(convs);
+    return convs;
+  }, [params.id]);
+
   useEffect(() => {
     apiFetch<any>("/api/v1/agent/capabilities").then(setCapabilities).catch(() => {});
-    // Retomar el último hilo de investigación del proyecto
-    apiFetch<any[]>(`/api/v1/projects/${params.id}/agent/conversations?agent_type=investigacion`)
-      .then(async (convs) => {
-        if (!convs.length) return;
-        const latest = convs[0];
-        setConvId(latest.id);
-        const msgs = await apiFetch<any[]>(`/api/v1/agent/conversations/${latest.id}/messages`);
-        setThread(
-          msgs.map((m) => ({
-            role: m.role,
-            content: m.role === "assistant" ? cleanMd(m.content) : m.content,
-            citations: m.tool_calls?.citations,
-            engine: m.tool_calls?.engine,
-          }))
-        );
+    // Cargar TODOS los hilos de investigación y retomar el más reciente
+    loadConvList()
+      .then((convs) => {
+        if (convs.length) loadThread(convs[0].id);
       })
       .catch(() => {});
-  }, [params.id]);
+  }, [params.id, loadConvList, loadThread]);
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -250,6 +262,7 @@ export default function DocumentPage() {
           conversation_id: convId || undefined,
         }),
       });
+      const isNewConversation = !convId;
       setConvId(res.conversation_id);
       const turn: ResearchTurn = {
         role: "assistant",
@@ -259,6 +272,7 @@ export default function DocumentPage() {
       };
       setThread((t) => [...t, turn]);
       setReader(turn); // abrir en modo lectura amplio automáticamente
+      if (isNewConversation) loadConvList().catch(() => {});
     } catch (e: any) {
       setThread((t) => t.slice(0, -1));
       setAiQuery(query); // devolver el texto para reintentar
@@ -378,6 +392,37 @@ export default function DocumentPage() {
 
             {panelTab === "investigador" ? (
               <div className="p-3 space-y-2.5">
+                {/* Selector de hilos: todos los hilos quedan guardados */}
+                {convList.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="input !py-1.5 text-xs flex-1"
+                      value={convId ?? ""}
+                      onChange={(e) => {
+                        if (e.target.value) loadThread(e.target.value).catch(() => {});
+                      }}
+                    >
+                      {!convId && <option value="">— hilo nuevo —</option>}
+                      {convList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.title || "Investigación"} ·{" "}
+                          {new Date(c.updated_at).toLocaleDateString("es-PY", {
+                            day: "2-digit",
+                            month: "2-digit",
+                          })}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn-secondary !px-2.5 !py-1.5 text-xs whitespace-nowrap"
+                      onClick={newThread}
+                      title="Los hilos anteriores quedan guardados en este selector"
+                    >
+                      🆕 Nuevo
+                    </button>
+                  </div>
+                )}
+
                 {/* Hilo de investigación con memoria */}
                 <div className="max-h-[58vh] overflow-y-auto space-y-2.5 pr-1">
                   {thread.length === 0 && !aiLoading && (
@@ -503,11 +548,6 @@ export default function DocumentPage() {
                             ))}
                           </div>
                         </details>
-                        {thread.length > 0 && (
-                          <button className="hover:text-brand-ink" onClick={newThread}>
-                            🆕 Nuevo hilo
-                          </button>
-                        )}
                       </div>
                     </div>
 
