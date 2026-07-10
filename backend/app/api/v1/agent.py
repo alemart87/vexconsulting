@@ -358,6 +358,92 @@ _RESEARCH_SYSTEM = (
 )
 
 
+async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict]]:
+    """Investigación vía el Agent API de Perplexity (POST /v1/agent, multi-proveedor,
+    tool web_search nativa). Fallback al /chat/completions clásico si no está
+    disponible para la cuenta."""
+    import httpx
+
+    model = settings.perplexity_model
+    if "/" not in model:
+        model = f"perplexity/{model}"
+
+    headers = {"Authorization": f"Bearer {settings.perplexity_api_key}"}
+    async with httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(
+            settings.perplexity_agent_url,
+            headers=headers,
+            json={
+                "model": model,
+                "input": user_prompt,
+                "instructions": _RESEARCH_SYSTEM,
+                "tools": [{"type": "web_search"}],
+            },
+        )
+        if resp.status_code == 401:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "La API key de Perplexity es inválida")
+
+        if resp.status_code in (404, 405):
+            # Cuenta sin Agent API: endpoint clásico con el modelo sin prefijo
+            legacy_model = model.split("/", 1)[-1]
+            resp = await client.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers=headers,
+                json={
+                    "model": legacy_model,
+                    "messages": [
+                        {"role": "system", "content": _RESEARCH_SYSTEM},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            answer = (data["choices"][0]["message"]["content"] or "").strip()
+            citations: list[dict] = []
+            for c in data.get("citations") or []:
+                citations.append({"url": c, "title": c} if isinstance(c, str) else c)
+            for sr in data.get("search_results") or []:
+                if isinstance(sr, dict) and sr.get("url"):
+                    citations.append({"url": sr["url"], "title": sr.get("title") or sr["url"]})
+            return answer, citations
+
+        if resp.status_code == 400:
+            detail = ""
+            try:
+                detail = (resp.json().get("error") or {}).get("message", "")
+            except Exception:
+                pass
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Perplexity rechazó la consulta: {detail or resp.text[:200]}",
+            )
+        resp.raise_for_status()
+        data = resp.json()
+
+    # Agent API: output = [{type: search_results|message|fetch_url_results, ...}]
+    parts: list[str] = []
+    citations = []
+    for item in data.get("output") or []:
+        itype = item.get("type")
+        if itype == "message":
+            for content in item.get("content") or []:
+                if content.get("type") == "output_text":
+                    parts.append(content.get("text") or "")
+                for ann in content.get("annotations") or []:
+                    if ann.get("url"):
+                        citations.append({
+                            "url": ann["url"],
+                            "title": ann.get("title") or ann["url"],
+                        })
+        elif itype == "search_results":
+            for r in item.get("results") or []:
+                if r.get("url"):
+                    citations.append({"url": r["url"], "title": r.get("title") or r["url"]})
+    answer = "\n".join(p for p in parts if p).strip() or (data.get("output_text") or "").strip()
+    return answer, citations
+
+
 async def _project_grounding(db: AsyncSession, project_id: str, query: str) -> str:
     from ...services.rag.retriever import format_citation, search_chunks
 
@@ -399,30 +485,7 @@ async def research(
                 "Perplexity no está configurado: cargá PERPLEXITY_API_KEY en el .env "
                 "(la key se genera en perplexity.ai/settings/api).",
             )
-        import httpx
-
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                "https://api.perplexity.ai/chat/completions",
-                headers={"Authorization": f"Bearer {settings.perplexity_api_key}"},
-                json={
-                    "model": settings.perplexity_model,
-                    "messages": [
-                        {"role": "system", "content": _RESEARCH_SYSTEM},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                },
-            )
-            if resp.status_code == 401:
-                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "La API key de Perplexity es inválida")
-            resp.raise_for_status()
-            data = resp.json()
-        answer = (data["choices"][0]["message"]["content"] or "").strip()
-        for c in data.get("citations") or []:
-            citations.append({"url": c, "title": c} if isinstance(c, str) else c)
-        for sr in data.get("search_results") or []:
-            if isinstance(sr, dict) and sr.get("url"):
-                citations.append({"url": sr["url"], "title": sr.get("title") or sr["url"]})
+        answer, citations = await _perplexity_research(user_prompt)
     else:
         if not settings.openai_api_key:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")

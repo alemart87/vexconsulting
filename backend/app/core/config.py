@@ -75,9 +75,13 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     embedding_price_per_mtok: float = 0.02
 
-    # Investigación profunda
+    # Investigación profunda (Perplexity Agent API, multi-proveedor)
     perplexity_api_key: str = ""
-    perplexity_model: str = "sonar-pro"
+    # Nota: el Agent API habilita modelos según el nivel de uso de la cuenta;
+    # "perplexity/sonar" está disponible desde el nivel inicial, "sonar-pro"
+    # requiere nivel superior. También acepta openai/*, anthropic/*, etc.
+    perplexity_model: str = "perplexity/sonar"
+    perplexity_agent_url: str = "https://api.perplexity.ai/v1/agent"
 
     # OCR opcional para PDFs escaneados
     ocr_enabled: bool = False
