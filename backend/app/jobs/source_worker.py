@@ -106,10 +106,7 @@ async def _process(source_id: str, pool: ProcessPoolExecutor) -> None:
             ))
         source.status = "ready" if chunks else "failed"
         if not chunks:
-            source.last_error = (
-                "El archivo no contiene texto extraíble (si es un PDF escaneado, "
-                "verificá que el OCR esté habilitado y reintentá)."
-            )
+            source.last_error = _no_text_message(source)
         source.chunk_count = len(chunks)
         source.extracted_chars = extracted_chars
         source.page_count = extraction.get("page_count")
@@ -119,6 +116,43 @@ async def _process(source_id: str, pool: ProcessPoolExecutor) -> None:
         source.finished_at = datetime.now(timezone.utc)
         await db.commit()
     logger.info("Fuente %s procesada: %s chunks", source_id[:8], len(chunks))
+
+
+def _no_text_message(source: Source) -> str:
+    """Mensaje de falla específico por tipo de archivo, accionable para el usuario."""
+    name = (source.original_filename or source.title or "").lower()
+    mime = (source.mime_type or "").lower()
+
+    if source.kind == "link":
+        return (
+            "No se pudo extraer contenido de la página: puede requerir inicio de sesión, "
+            "bloquear robots o estar construida solo con JavaScript. Alternativa: guardala "
+            "como PDF desde el navegador y subila como archivo."
+        )
+    if "pdf" in mime or name.endswith(".pdf"):
+        return (
+            "El PDF no tiene capa de texto y el OCR con IA tampoco reconoció contenido "
+            "legible (¿imagen de muy baja resolución o página en blanco?). Probá con un "
+            "escaneo de mejor calidad o exportá el documento original a PDF."
+        )
+    if name.endswith(".docx") or "wordprocessingml" in mime:
+        return (
+            "El Word no contiene texto en el cuerpo del documento. Se buscó también en "
+            "cuadros de texto y se aplicó OCR con IA a las imágenes incrustadas, sin "
+            "resultado legible. Si el contenido está en capturas, verificá su nitidez; "
+            "si es un .doc antiguo, guardalo como .docx y reintentá."
+        )
+    if mime.startswith("image/"):
+        return (
+            "La IA de visión no reconoció texto ni datos legibles en la imagen. "
+            "Verificá la nitidez y el tamaño, y reintentá."
+        )
+    if name.endswith((".xlsx", ".xlsm")):
+        return "La planilla no tiene filas con datos en ninguna hoja."
+    return (
+        "No se pudo extraer contenido del archivo. Formatos soportados: PDF, Word (.docx), "
+        "Excel (.xlsx), texto, imágenes (PNG/JPG) y links."
+    )
 
 
 async def _fail(source_id: str, message: str) -> None:

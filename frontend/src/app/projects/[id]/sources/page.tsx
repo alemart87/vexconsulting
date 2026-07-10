@@ -139,14 +139,15 @@ export default function SourcesPage() {
                 Arrastrá archivos o hacé clic para subir
               </p>
               <p className="text-xs text-brand-slate mt-1">
-                PDF, Word, Excel, CSV, texto — se extraen e indexan automáticamente para la IA
+                PDF (con OCR para escaneados), Word, Excel, CSV, texto e imágenes — la IA
+                extrae el texto y los datos automáticamente
               </p>
               <input
                 ref={fileInput}
                 type="file"
                 multiple
                 className="hidden"
-                accept=".pdf,.docx,.xlsx,.xlsm,.txt,.md,.csv"
+                accept=".pdf,.docx,.xlsx,.xlsm,.txt,.md,.csv,.png,.jpg,.jpeg,.webp,.gif"
                 onChange={(e) => {
                   if (e.target.files?.length) upload(e.target.files);
                   e.currentTarget.value = "";

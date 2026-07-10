@@ -81,53 +81,174 @@ def _pymupdf_text(path: str) -> list[Section]:
     return pages
 
 
-def _vision_ocr(path: str, max_pages: int = 30) -> list[Section]:
-    """Transcribe páginas escaneadas con el modelo de visión de OpenAI.
+_OCR_PROMPT = (
+    "Transcribí TODO el texto visible de esta imagen, en orden de lectura y en su "
+    "idioma original. Las tablas como tablas Markdown. Si hay gráficos, extraé sus "
+    "datos y describilos brevemente. Respondé SOLO con el contenido; si no hay nada "
+    "legible, respondé VACIO."
+)
+
+
+def _vision_available() -> bool:
+    from ...core.config import settings
+
+    return bool(settings.ocr_enabled and settings.openai_api_key)
+
+
+def _vision_image_text(image_bytes: bytes, mime: str = "image/png") -> str:
+    """Transcripción/extracción de datos de una imagen con visión de OpenAI.
     Corre en el subproceso de ingesta (cliente síncrono)."""
     import base64
 
-    import fitz  # PyMuPDF
     from openai import OpenAI
 
     from ...core.config import settings
 
     client = OpenAI(api_key=settings.openai_api_key, timeout=180)
+    b64 = base64.b64encode(image_bytes).decode()
+    try:
+        resp = client.chat.completions.create(
+            model=settings.agent_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _OCR_PROMPT},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                    ],
+                }
+            ],
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return "" if text.upper() == "VACIO" else text
+    except Exception:
+        return ""
+
+
+def _vision_ocr(path: str, max_pages: int = 30) -> list[Section]:
+    """OCR de PDF escaneado: cada página se renderiza a PNG y se transcribe."""
+    import fitz  # PyMuPDF
+
+    if not _vision_available():
+        return []
     doc = fitz.open(path)
     pages: list[Section] = []
     for i, page in enumerate(doc, start=1):
         if i > max_pages:
             break
         pix = page.get_pixmap(dpi=150)
-        b64 = base64.b64encode(pix.tobytes("png")).decode()
-        try:
-            resp = client.chat.completions.create(
-                model=settings.agent_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Transcribí TODO el texto visible de esta página "
-                                "escaneada, en orden de lectura y en su idioma original. "
-                                "Las tablas como tablas Markdown. Respondé SOLO con el texto; "
-                                "si la página no tiene texto, respondé VACIO.",
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{b64}"},
-                            },
-                        ],
-                    }
-                ],
-            )
-            text = (resp.choices[0].message.content or "").strip()
-            if text and text.upper() != "VACIO":
-                pages.append({"text": text, "meta": {"page": i, "ocr": True}})
-        except Exception:
-            continue  # una página fallida no aborta el documento
+        text = _vision_image_text(pix.tobytes("png"))
+        if text:
+            pages.append({"text": text, "meta": {"page": i, "ocr": True}})
     doc.close()
     return pages
+
+
+def extract_image(path: str, mime: str) -> list[Section]:
+    """Imagen subida como fuente: se transcribe/analiza con visión."""
+    if not _vision_available():
+        raise ValueError(
+            "Para indexar imágenes se necesita la IA de visión (OPENAI_API_KEY + OCR habilitado)."
+        )
+    data = Path(path).read_bytes()
+    if len(data) > 18 * 1024 * 1024:
+        raise ValueError("La imagen supera los 18 MB; reducila e intentá de nuevo.")
+    text = _vision_image_text(data, mime or "image/png")
+    return [{"text": text, "meta": {"ocr": True}}] if text else []
+
+
+def _docx_altchunks(path: str) -> list[Section]:
+    """Contenido en altChunk: documentos generados por conversores guardan el
+    cuerpo real como HTML/MHT incrustado (word/afchunk.mht) y el document.xml
+    queda vacío. Se parsea el MIME y se extrae el HTML."""
+    import zipfile
+
+    sections: list[Section] = []
+    try:
+        with zipfile.ZipFile(path) as z:
+            chunks = [
+                n for n in z.namelist()
+                if n.startswith("word/") and n.lower().endswith((".mht", ".mhtml", ".html", ".htm"))
+            ]
+            for name in chunks[:5]:
+                raw = z.read(name)
+                html_text = ""
+                if name.lower().endswith((".mht", ".mhtml")):
+                    import email
+
+                    msg = email.message_from_bytes(raw)
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/html":
+                            payload = part.get_payload(decode=True) or b""
+                            charset = part.get_content_charset() or "utf-8"
+                            html_text = payload.decode(charset, errors="replace")
+                            break
+                    if not html_text and raw.lstrip()[:1] == b"<":
+                        html_text = raw.decode("utf-8", errors="replace")
+                else:
+                    html_text = raw.decode("utf-8", errors="replace")
+
+                if html_text:
+                    from bs4 import BeautifulSoup
+
+                    soup = BeautifulSoup(html_text, "html.parser")
+                    for tag in soup(["script", "style"]):
+                        tag.decompose()
+                    text = "\n".join(
+                        t.strip() for t in soup.get_text("\n").splitlines() if t.strip()
+                    )
+                    if text:
+                        sections.append({"text": text, "meta": {"section": "contenido"}})
+    except Exception:
+        pass
+    return sections
+
+
+def _docx_textboxes(path: str) -> list[str]:
+    """Texto dentro de cuadros de texto/formas (python-docx no los lee)."""
+    import zipfile
+    from xml.etree import ElementTree
+
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    texts: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml")
+        root = ElementTree.fromstring(xml)
+        for txbx in root.iter(f"{W}txbxContent"):
+            fragment = "".join(node.text or "" for node in txbx.iter(f"{W}t")).strip()
+            if fragment:
+                texts.append(fragment)
+    except Exception:
+        pass
+    return texts
+
+
+def _docx_images_ocr(path: str, max_images: int = 15) -> list[Section]:
+    """OCR de las imágenes incrustadas en el Word (documentos armados con capturas)."""
+    import zipfile
+
+    if not _vision_available():
+        return []
+    sections: list[Section] = []
+    mime_by_ext = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                   ".webp": "image/webp", ".gif": "image/gif"}
+    try:
+        with zipfile.ZipFile(path) as z:
+            media = [
+                n for n in z.namelist()
+                if n.startswith("word/media/") and Path(n).suffix.lower() in mime_by_ext
+            ][:max_images]
+            for idx, name in enumerate(media, start=1):
+                data = z.read(name)
+                if len(data) < 8_000:  # íconos y decoraciones
+                    continue
+                text = _vision_image_text(data, mime_by_ext[Path(name).suffix.lower()])
+                if text:
+                    sections.append({"text": text, "meta": {"section": f"imagen {idx}", "ocr": True}})
+    except Exception:
+        pass
+    return sections
 
 
 def extract_docx(path: str) -> list[Section]:
@@ -167,6 +288,21 @@ def extract_docx(path: str) -> list[Section]:
                 "text": "\n".join(rows),
                 "meta": {"section": f"tabla {t_idx}"},
             })
+    sections = [s for s in sections if s["text"]]
+
+    total_chars = sum(len(s["text"]) for s in sections)
+    if total_chars < 200:
+        # Contenido en altChunk (HTML/MHT incrustado por conversores)
+        sections.extend(_docx_altchunks(path))
+        total_chars = sum(len(s["text"]) for s in sections)
+    if total_chars < 200:
+        # Words armados con cuadros de texto (python-docx no los lee)
+        for fragment in _docx_textboxes(path):
+            sections.append({"text": fragment, "meta": {"section": "cuadro de texto"}})
+        total_chars = sum(len(s["text"]) for s in sections)
+    if total_chars < 200:
+        # Words armados con imágenes/capturas: OCR con visión
+        sections.extend(_docx_images_ocr(path))
     return [s for s in sections if s["text"]]
 
 
@@ -282,8 +418,10 @@ def extract_source(kind: str, stored_path: str | None, url: str | None,
         return {"sections": extract_xlsx(stored_path, max_rows), "page_count": None, "title_hint": None}
     if lower.endswith((".txt", ".md", ".csv")) or mt.startswith("text/"):
         return {"sections": extract_text_file(stored_path), "page_count": None, "title_hint": None}
+    if mt.startswith("image/") or lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        return {"sections": extract_image(stored_path, mt), "page_count": None, "title_hint": None}
 
     raise ValueError(
         "Formato no soportado. Aceptamos PDF, Word (.docx), Excel (.xlsx), "
-        "texto (.txt/.md/.csv) y links."
+        "texto (.txt/.md/.csv), imágenes (PNG/JPG) y links."
     )
