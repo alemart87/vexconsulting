@@ -50,15 +50,15 @@ async def upload_image(
 
 
 @router.get("/projects/{project_id}/images/{name}")
-async def get_image(
-    project_id: str,
-    name: str,
-    access: ProjectAccess = Depends(require_project_read),
-) -> FileResponse:
+async def get_image(project_id: str, name: str) -> FileResponse:
+    """Sirve la imagen SIN header de autenticación (una etiqueta <img> no puede
+    enviarlo). La URL es de capacidad: project_id (uuid) + nombre con hash
+    sha256 parcial + uuid — impredecible sin conocer el documento. Subir sigue
+    exigiendo permiso de escritura."""
     # Sin path traversal: solo nombre plano dentro del directorio del proyecto.
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nombre inválido")
     target = _images_dir(project_id) / name
     if not target.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Imagen no encontrada")
-    return FileResponse(target)
+    return FileResponse(target, headers={"Cache-Control": "private, max-age=86400"})

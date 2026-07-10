@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api";
 const TABS = [
   { href: "", label: "Resumen" },
   { href: "/document", label: "Documento" },
+  { href: "/preview", label: "Vista previa" },
   { href: "/sources", label: "Fuentes" },
   { href: "/notes", label: "Notas" },
   { href: "/gantt", label: "Gantt" },

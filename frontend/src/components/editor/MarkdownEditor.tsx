@@ -158,14 +158,22 @@ export default function MarkdownEditor({
             <>
               <span className="w-px h-5 bg-brand-border mx-1" />
               <ToolbarButton
-                title="Sugerencia de IA sobre la selección o el final del texto"
+                title="Asistente de IA: continuar, mejorar o expandir donde está el cursor"
                 onClick={() => {
                   const md = (editor.storage as any).markdown.getMarkdown() as string;
                   const { from, to } = editor.state.selection;
                   const selected = editor.state.doc.textBetween(from, to, "\n");
-                  const context = selected || md.slice(-2500);
+                  // Contexto: la selección, o el texto ANTERIOR al cursor (no el final del doc)
+                  const before = editor.state.doc.textBetween(0, from, "\n");
+                  const context = selected || before.slice(-2500) || md.slice(0, 2500);
+                  const anchor = to; // posición capturada AHORA: ahí se inserta
                   onRequestAi(context, (text) => {
-                    editor.chain().focus().insertContent(text).run();
+                    const pos = Math.min(anchor, editor.state.doc.content.size);
+                    editor
+                      .chain()
+                      .focus()
+                      .insertContentAt(pos, `\n\n${text}`)
+                      .run();
                   });
                 }}
               >

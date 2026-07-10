@@ -54,9 +54,25 @@ class SuggestRequest(BaseModel):
     instruction: str | None = Field(default=None, max_length=500)
 
 
+class ResearchRequest(BaseModel):
+    query: str = Field(min_length=3, max_length=2000)
+    context_text: str | None = Field(default=None, max_length=12000)
+    engine: str = "openai"  # openai (web_search) | perplexity (sonar)
+
+
 @router.get("/agent/roles")
 async def get_roles() -> list[dict]:
     return list_roles()
+
+
+@router.get("/agent/capabilities")
+async def get_capabilities() -> dict:
+    return {
+        "openai": bool(settings.openai_api_key),
+        "perplexity": settings.perplexity_enabled,
+        "model": settings.agent_model,
+        "perplexity_model": settings.perplexity_model,
+    }
 
 
 @router.get("/projects/{project_id}/agent/conversations")
@@ -280,32 +296,179 @@ async def suggest_text(
     project_id: str,
     payload: SuggestRequest,
     access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Autocompletado corto para el editor: continúa o mejora el texto dado.
-    Llamada directa (sin agente ni tools) para latencia baja."""
+    """Asistente de redacción del editor: continúa, mejora, resume o expande el
+    texto según la instrucción, apoyado en las fuentes del proyecto (RAG) con
+    citas. Llamada directa (sin agente) para latencia baja."""
     if not settings.openai_api_key:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
 
     from openai import AsyncOpenAI
 
+    from ...services.rag.retriever import format_citation, search_chunks
+
+    # Grounding: los fragmentos de las fuentes más afines al texto en edición.
+    fuentes_block = ""
+    try:
+        chunks = await search_chunks(db, project_id, payload.context_text[-500:], k=4)
+        if chunks:
+            fuentes_block = "\n\nFUENTES DEL PROYECTO (usalas si aportan; citá con el formato dado):\n" + "\n\n".join(
+                f"{format_citation(c)}\n{c['content'][:800]}" for c in chunks
+            )
+    except Exception:
+        pass
+
     client = AsyncOpenAI(api_key=settings.openai_api_key)
     instruction = payload.instruction or (
-        "Continuá el texto de forma natural, en el mismo registro y en español, "
-        "con 1 a 3 oraciones sobrias de informe de investigación. Si el texto "
-        "termina a mitad de una idea, completala."
+        "Continuá el texto de forma natural, en el mismo registro, con 1 a 3 "
+        "oraciones sobrias de informe de investigación. Si el texto termina a "
+        "mitad de una idea, completala."
     )
     resp = await client.chat.completions.create(
         model=settings.agent_model,
-        max_completion_tokens=400,
+        max_completion_tokens=700,
         messages=[
             {
                 "role": "system",
                 "content": "Sos un asistente de redacción de informes de investigación "
-                "de mercado en español, registro institucional sobrio. Respondé SOLO "
-                "con el texto sugerido en Markdown, sin preámbulos.",
+                "de mercado en español, registro institucional sobrio (sin grandilocuencia). "
+                "Respondé SOLO con el texto sugerido en Markdown, sin preámbulos ni "
+                "explicaciones. Si afirmás una cifra tomada de las fuentes, citala "
+                "entre corchetes como te la presentan.",
             },
-            {"role": "user", "content": f"{instruction}\n\n---\n{payload.context_text}"},
+            {
+                "role": "user",
+                "content": f"INSTRUCCIÓN: {instruction}\n\nTEXTO EN EDICIÓN:\n{payload.context_text}{fuentes_block}",
+            },
         ],
     )
     suggestion = (resp.choices[0].message.content or "").strip()
     return {"suggestion": suggestion}
+
+
+_RESEARCH_SYSTEM = (
+    "Sos un investigador de mercado senior redactando para un informe de consultoría "
+    "en español, registro institucional sobrio. Investigá la consulta con las "
+    "herramientas de búsqueda disponibles y con las fuentes internas provistas. "
+    "Respondé SOLO con el bloque de texto en Markdown listo para insertar en el "
+    "informe: hallazgos con cifras concretas, cada cifra con su fuente (enlace "
+    "markdown para fuentes web; corchetes para fuentes internas del proyecto). "
+    "Cerrá con una lista «Fuentes:» con los enlaces usados. Sin preámbulos."
+)
+
+
+async def _project_grounding(db: AsyncSession, project_id: str, query: str) -> str:
+    from ...services.rag.retriever import format_citation, search_chunks
+
+    try:
+        chunks = await search_chunks(db, project_id, query, k=4)
+    except Exception:
+        return ""
+    if not chunks:
+        return ""
+    return "\n\nFUENTES INTERNAS DEL PROYECTO (citá con el formato dado):\n" + "\n\n".join(
+        f"{format_citation(c)}\n{c['content'][:800]}" for c in chunks
+    )
+
+
+@router.post("/projects/{project_id}/agent/research")
+async def research(
+    project_id: str,
+    payload: ResearchRequest,
+    request: Request,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Agente de investigación del editor: búsqueda web real (OpenAI web_search
+    o Perplexity Sonar) + fuentes internas del proyecto, con citas verificables."""
+    grounding = await _project_grounding(db, project_id, payload.query)
+    context_block = (
+        f"\n\nCONTEXTO DEL DOCUMENTO EN EDICIÓN:\n{payload.context_text[-4000:]}"
+        if payload.context_text
+        else ""
+    )
+    user_prompt = f"CONSULTA DE INVESTIGACIÓN: {payload.query}{context_block}{grounding}"
+
+    citations: list[dict] = []
+
+    if payload.engine == "perplexity":
+        if not settings.perplexity_enabled:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Perplexity no está configurado: cargá PERPLEXITY_API_KEY en el .env "
+                "(la key se genera en perplexity.ai/settings/api).",
+            )
+        import httpx
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={"Authorization": f"Bearer {settings.perplexity_api_key}"},
+                json={
+                    "model": settings.perplexity_model,
+                    "messages": [
+                        {"role": "system", "content": _RESEARCH_SYSTEM},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+            )
+            if resp.status_code == 401:
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "La API key de Perplexity es inválida")
+            resp.raise_for_status()
+            data = resp.json()
+        answer = (data["choices"][0]["message"]["content"] or "").strip()
+        for c in data.get("citations") or []:
+            citations.append({"url": c, "title": c} if isinstance(c, str) else c)
+        for sr in data.get("search_results") or []:
+            if isinstance(sr, dict) and sr.get("url"):
+                citations.append({"url": sr["url"], "title": sr.get("title") or sr["url"]})
+    else:
+        if not settings.openai_api_key:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180)
+        resp = await client.responses.create(
+            model=settings.agent_model,
+            tools=[{"type": "web_search"}],
+            instructions=_RESEARCH_SYSTEM,
+            input=user_prompt,
+        )
+        answer = (getattr(resp, "output_text", "") or "").strip()
+        # Extraer citas de las anotaciones url_citation del Responses API
+        try:
+            for item in getattr(resp, "output", []) or []:
+                for content in getattr(item, "content", []) or []:
+                    for ann in getattr(content, "annotations", []) or []:
+                        if getattr(ann, "type", "") == "url_citation":
+                            citations.append({
+                                "url": getattr(ann, "url", ""),
+                                "title": getattr(ann, "title", "") or getattr(ann, "url", ""),
+                            })
+        except Exception:
+            pass
+
+    # Fallback: extraer los enlaces markdown de la respuesta como citas
+    if not citations and answer:
+        import re as _re
+
+        for title, url in _re.findall(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", answer):
+            citations.append({"url": url, "title": title})
+
+    # Dedupe de citas por URL
+    seen: set[str] = set()
+    unique_citations = []
+    for c in citations:
+        url = c.get("url") or ""
+        if url and url not in seen:
+            seen.add(url)
+            unique_citations.append(c)
+
+    await log_action(
+        db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
+        action="agent.research", project_id=project_id, entity_type="research",
+        detail={"engine": payload.engine, "query": payload.query[:120]},
+        ip=client_ip(request),
+    )
+    return {"answer": answer, "citations": unique_citations, "engine": payload.engine}

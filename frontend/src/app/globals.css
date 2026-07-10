@@ -162,3 +162,15 @@ h3,
 .diff-line-add { @apply bg-emerald-50 text-emerald-800 block px-2; }
 .diff-line-del { @apply bg-red-50 text-red-700 block px-2 line-through; }
 .diff-line-ctx { @apply text-brand-slate block px-2; }
+
+/* ===== Impresión (vista previa → PDF del navegador) ===== */
+@media print {
+  header, footer, nav { display: none !important; }
+  body { background: white !important; }
+  main { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  .card { box-shadow: none !important; border: none !important; }
+  .prose-vex h1 { border-bottom: 3px solid #e6332a; padding-bottom: 6px; }
+  .prose-vex { font-size: 11pt; }
+  a { color: inherit; text-decoration: none; }
+}
+@page { margin: 18mm 15mm; }

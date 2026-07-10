@@ -30,8 +30,95 @@ export default function DocumentPage() {
   const [conflict, setConflict] = useState(false);
   const [summary, setSummary] = useState("");
   const [aiSuggestion, setAiSuggestion] = useState<string>("");
+  const [aiCitations, setAiCitations] = useState<{ url: string; title: string }[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiLoadingLabel, setAiLoadingLabel] = useState("");
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [capabilities, setCapabilities] = useState<{ openai: boolean; perplexity: boolean }>({
+    openai: true,
+    perplexity: false,
+  });
+  const aiContextRef = useRef<string>("");
   const insertFnRef = useRef<((text: string) => void) | null>(null);
+
+  useEffect(() => {
+    apiFetch<any>("/api/v1/agent/capabilities").then(setCapabilities).catch(() => {});
+  }, []);
+
+  const AI_ACTIONS = [
+    { label: "▸ Continuar el texto", instruction: "" },
+    {
+      label: "✍ Mejorar la redacción",
+      instruction:
+        "Reescribí el texto en edición mejorando claridad, precisión y registro institucional sobrio. Mantené todos los datos y citas.",
+    },
+    {
+      label: "≡ Resumir",
+      instruction: "Resumí el texto en edición en un párrafo ejecutivo, conservando las cifras clave con sus citas.",
+    },
+    {
+      label: "📊 Expandir con datos de las fuentes",
+      instruction:
+        "Ampliá el texto en edición con datos concretos tomados de las fuentes del proyecto, citando cada cifra.",
+    },
+  ];
+
+  const requestSuggestion = async (instruction: string) => {
+    setAiLoading(true);
+    setAiLoadingLabel("Redactando con las fuentes del proyecto…");
+    setAiSuggestion("");
+    setAiCitations([]);
+    try {
+      const res = await apiFetch<{ suggestion: string }>(
+        `/api/v1/projects/${params.id}/agent/suggest`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            context_text: aiContextRef.current,
+            instruction: instruction || undefined,
+          }),
+        }
+      );
+      setAiSuggestion(res.suggestion);
+    } catch (e: any) {
+      setStatus(`IA: ${e.message}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const requestResearch = async (engine: "openai" | "perplexity") => {
+    const query = aiInstruction.trim();
+    if (!query) {
+      setStatus("IA: escribí qué querés investigar en el campo de texto");
+      return;
+    }
+    setAiLoading(true);
+    setAiLoadingLabel(
+      engine === "perplexity"
+        ? "Investigando con Perplexity (Sonar)…"
+        : "Investigando en la web con OpenAI… puede tardar hasta un minuto"
+    );
+    setAiSuggestion("");
+    setAiCitations([]);
+    try {
+      const res = await apiFetch<any>(`/api/v1/projects/${params.id}/agent/research`, {
+        method: "POST",
+        body: JSON.stringify({
+          query,
+          context_text: aiContextRef.current || undefined,
+          engine,
+        }),
+      });
+      setAiSuggestion(res.answer);
+      setAiCitations(res.citations || []);
+    } catch (e: any) {
+      setStatus(`Investigación: ${e.message}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
   const lockTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canWrite =
@@ -165,32 +252,129 @@ export default function DocumentPage() {
       </div>
       {status && <div className="text-xs text-emerald-700">{status}</div>}
 
-      {(aiSuggestion || aiLoading) && (
+      {aiPanelOpen && (
         <div className="card p-4 border-brand-cyan/50 animate-pop">
-          <div className="label !text-brand-cyan mb-2">✨ Sugerencia de IA</div>
-          {aiLoading ? (
-            <div className="shimmer-text text-sm font-semibold">Redactando sugerencia…</div>
-          ) : (
+          <div className="flex items-center justify-between mb-2">
+            <div className="label !text-brand-cyan !mb-0">✨ Asistente de redacción</div>
+            <button
+              className="btn-ghost text-xs !px-2 !py-1"
+              onClick={() => {
+                setAiPanelOpen(false);
+                setAiSuggestion("");
+              }}
+            >
+              ✕ Cerrar
+            </button>
+          </div>
+
+          <div className="flex gap-1.5 flex-wrap mb-2">
+            {AI_ACTIONS.map((a) => (
+              <button
+                key={a.label}
+                className="btn-secondary !px-3 !py-1.5 text-xs"
+                disabled={aiLoading}
+                onClick={() => requestSuggestion(a.instruction)}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 mb-2">
+            <input
+              className="input !py-1.5 text-xs flex-1"
+              placeholder="Instrucción o consulta: «tarifas BPO nearshore 2026 en LatAm con fuentes»…"
+              value={aiInstruction}
+              onChange={(e) => setAiInstruction(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && aiInstruction.trim()) requestSuggestion(aiInstruction);
+              }}
+              disabled={aiLoading}
+            />
+            <button
+              className="btn-secondary !py-1.5 text-xs"
+              disabled={aiLoading || !aiInstruction.trim()}
+              onClick={() => requestSuggestion(aiInstruction)}
+              title="Redacta con el documento y las fuentes internas (rápido)"
+            >
+              ✍ Redactar
+            </button>
+            <button
+              className="btn-primary !py-1.5 text-xs"
+              disabled={aiLoading || !aiInstruction.trim()}
+              onClick={() => requestResearch("openai")}
+              title="Investiga en la web con OpenAI (web_search) + fuentes internas, con citas"
+            >
+              🌐 Investigar
+            </button>
+            {capabilities.perplexity && (
+              <button
+                className="btn-primary !py-1.5 text-xs !bg-brand-purple hover:!bg-brand-ink"
+                disabled={aiLoading || !aiInstruction.trim()}
+                onClick={() => requestResearch("perplexity")}
+                title="Investigación con Perplexity Sonar, con citas"
+              >
+                🔍 Perplexity
+              </button>
+            )}
+          </div>
+
+          {aiLoading && (
+            <div className="shimmer-text text-sm font-semibold py-2">{aiLoadingLabel}</div>
+          )}
+          {aiSuggestion && !aiLoading && (
             <>
-              <pre className="text-sm whitespace-pre-wrap bg-brand-bg-soft rounded p-3 max-h-48 overflow-y-auto">
+              <pre className="text-sm whitespace-pre-wrap bg-brand-bg-soft rounded p-3 max-h-64 overflow-y-auto font-sans">
                 {aiSuggestion}
               </pre>
+              {aiCitations.length > 0 && (
+                <div className="mt-2 rounded-md border border-brand-border p-2.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider2 text-brand-slate mb-1">
+                    Fuentes web consultadas ({aiCitations.length})
+                  </div>
+                  <ul className="space-y-0.5 max-h-28 overflow-y-auto">
+                    {aiCitations.map((c, i) => (
+                      <li key={i} className="text-xs truncate">
+                        <a href={c.url} target="_blank" rel="noreferrer" className="text-brand-cyan underline">
+                          {c.title || c.url}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="flex gap-2 mt-2">
                 <button
                   className="btn-primary !py-1.5 text-xs"
                   onClick={() => {
                     insertFnRef.current?.(aiSuggestion);
                     setAiSuggestion("");
+                    setAiCitations([]);
                     setDirty(true);
                   }}
                 >
-                  Insertar en el documento
+                  ⤵ Insertar donde estaba el cursor
                 </button>
-                <button className="btn-ghost text-xs" onClick={() => setAiSuggestion("")}>
+                <button
+                  className="btn-ghost text-xs"
+                  onClick={() => {
+                    setAiSuggestion("");
+                    setAiCitations([]);
+                  }}
+                >
                   Descartar
                 </button>
               </div>
             </>
+          )}
+          {!aiSuggestion && !aiLoading && (
+            <p className="text-xs text-brand-slate">
+              «✍ Redactar» usa el documento y las fuentes internas. «🌐 Investigar» busca en la
+              web en tiempo real (OpenAI web_search) y devuelve texto con citas verificables.
+              {capabilities.perplexity
+                ? " «🔍 Perplexity» usa Sonar como segundo motor de investigación."
+                : " Para habilitar Perplexity como segundo motor, cargá PERPLEXITY_API_KEY en el .env."}{" "}
+              Todo se inserta exactamente donde estaba el cursor.
+            </p>
           )}
         </div>
       )}
@@ -201,21 +385,11 @@ export default function DocumentPage() {
         editable={editable}
         onDirty={setDirty}
         editorRef={editorRef}
-        onRequestAi={async (contextText, insert) => {
+        onRequestAi={(contextText, insert) => {
+          aiContextRef.current = contextText;
           insertFnRef.current = insert;
-          setAiLoading(true);
+          setAiPanelOpen(true);
           setAiSuggestion("");
-          try {
-            const res = await apiFetch<{ suggestion: string }>(
-              `/api/v1/projects/${params.id}/agent/suggest`,
-              { method: "POST", body: JSON.stringify({ context_text: contextText }) }
-            );
-            setAiSuggestion(res.suggestion);
-          } catch (e: any) {
-            setStatus(`IA: ${e.message}`);
-          } finally {
-            setAiLoading(false);
-          }
         }}
       />
     </div>
