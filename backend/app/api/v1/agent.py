@@ -579,6 +579,11 @@ async def _load_research_history(db: AsyncSession, conversation_id: str) -> str:
     messages = list(reversed(rows.scalars().all()))
     if not messages:
         return ""
+    # Excluir placeholders en curso (contenido vacío) y el último mensaje del
+    # usuario si coincide con la consulta actual la duplica el prompt — inocuo.
+    messages = [m for m in messages if (m.content or "").strip()]
+    if not messages:
+        return ""
     parts = ["\n\nHISTORIAL DE LA INVESTIGACIÓN (construí sobre esto, no lo repitas):"]
     # Los mensajes recientes conservan más contenido (el analista de gráficos
     # necesita los datos completos de la última investigación).
@@ -879,111 +884,160 @@ async def research(
         db.add(conversation)
         await db.flush()
 
-    history_block = await _load_research_history(db, conversation.id)
-    grounding = await _project_grounding(
-        db, project_id, payload.query, payload.attachment_source_ids
-    )
-    context_block = (
-        f"\n\nCONTEXTO DEL DOCUMENTO EN EDICIÓN:\n{payload.context_text[-4000:]}"
-        if payload.context_text
-        else ""
-    )
-    user_prompt = (
-        f"CONSULTA DE INVESTIGACIÓN: {payload.query}{history_block}{context_block}{grounding}"
-    )
+    if not conversation.title:
+        conversation.title = payload.query[:60]
 
-    citations: list[dict] = []
-    cost_usd = 0.0
-    engine_used = payload.engine
-
-    # ── Orquestador: pedido de gráfico/visualización → analista GPT ──
-    if _CHART_INTENT.search(payload.query):
-        answer, citations, cost_usd, engine_used = await _chart_task(
-            payload.query, history_block, context_block, project_id
-        )
-    elif payload.engine == "perplexity":
-        if not settings.perplexity_enabled:
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "Perplexity no está configurado: cargá PERPLEXITY_API_KEY en el .env "
-                "(la key se genera en perplexity.ai/settings/api).",
-            )
-        answer, citations, cost_usd = await _perplexity_research(user_prompt)
-    else:
-        if not settings.openai_api_key:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
-        from openai import AsyncOpenAI
-
-        from ...services.agent.pricing import compute_cost_usd
-
-        client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180)
-        resp = await client.responses.create(
-            model=settings.agent_model,
-            tools=[{"type": "web_search"}],
-            instructions=_RESEARCH_SYSTEM,
-            input=user_prompt,
-        )
-        answer = (getattr(resp, "output_text", "") or "").strip()
-        usage = getattr(resp, "usage", None)
-        if usage:
-            cost_usd = compute_cost_usd(
-                int(getattr(usage, "input_tokens", 0) or 0),
-                int(getattr(usage, "output_tokens", 0) or 0),
-            )
-        # Extraer citas de las anotaciones url_citation del Responses API
-        try:
-            for item in getattr(resp, "output", []) or []:
-                for content in getattr(item, "content", []) or []:
-                    for ann in getattr(content, "annotations", []) or []:
-                        if getattr(ann, "type", "") == "url_citation":
-                            citations.append({
-                                "url": getattr(ann, "url", ""),
-                                "title": getattr(ann, "title", "") or getattr(ann, "url", ""),
-                            })
-        except Exception:
-            pass
-
-    # Fallback: extraer los enlaces markdown de la respuesta como citas
-    if not citations and answer:
-        import re as _re
-
-        for title, url in _re.findall(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", answer):
-            citations.append({"url": url, "title": title})
-
-    # Dedupe de citas por URL
-    seen: set[str] = set()
-    unique_citations = []
-    for c in citations:
-        url = c.get("url") or ""
-        if url and url not in seen:
-            seen.add(url)
-            unique_citations.append(c)
-
-    # Limpieza de formato + referencias [n] → enlaces + lista de fuentes con títulos
-    answer = _clean_answer(answer)
-    answer = _linkify_citations(answer, unique_citations)
-
-    # Persistir el intercambio en el hilo (memoria del investigador)
+    # Registro INMEDIATO: la consulta y un placeholder quedan en el hilo, y la
+    # investigación corre en segundo plano en el servidor — el consultor puede
+    # navegar a cualquier parte de la aplicación sin perder el trabajo.
     db.add(Message(conversation_id=conversation.id, role="user", content=payload.query))
-    db.add(Message(
+    placeholder = Message(
         conversation_id=conversation.id,
         role="assistant",
-        content=answer,
-        tool_calls={"citations": unique_citations, "engine": engine_used},
-        cost_usd=cost_usd or None,
-    ))
-    conversation.updated_at = datetime.now(timezone.utc)
-
-    await log_action(
-        db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
-        action="agent.research", project_id=project_id, entity_type="research",
-        entity_id=conversation.id,
-        detail={"engine": engine_used, "query": payload.query[:120]},
-        ip=client_ip(request),
+        content="",
+        tool_calls={"status": "running", "engine": payload.engine},
     )
+    db.add(placeholder)
+    conversation.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(placeholder)
+
+    asyncio.create_task(_run_research_job(
+        message_id=placeholder.id,
+        conversation_id=conversation.id,
+        project_id=project_id,
+        query=payload.query,
+        engine=payload.engine,
+        context_text=payload.context_text,
+        attachment_ids=payload.attachment_source_ids,
+        user_info={
+            "id": access.user.id, "email": access.user.email,
+            "role": access.user.role,
+        },
+        ip=client_ip(request),
+    ))
     return {
-        "answer": answer,
-        "citations": unique_citations,
-        "engine": engine_used,
         "conversation_id": conversation.id,
+        "message_id": placeholder.id,
+        "status": "running",
     }
+
+
+async def _run_research_job(
+    *, message_id: str, conversation_id: str, project_id: str, query: str,
+    engine: str, context_text: str | None, attachment_ids: list[str] | None,
+    user_info: dict, ip: str,
+) -> None:
+    """Trabajo de investigación en segundo plano (sobrevive a la navegación)."""
+    answer = ""
+    unique_citations: list[dict] = []
+    cost_usd = 0.0
+    engine_used = engine
+    error: str | None = None
+
+    try:
+        async with session_scope() as db:
+            history_block = await _load_research_history(db, conversation_id)
+            grounding = await _project_grounding(db, project_id, query, attachment_ids)
+        context_block = (
+            f"\n\nCONTEXTO DEL DOCUMENTO EN EDICIÓN:\n{context_text[-4000:]}"
+            if context_text else ""
+        )
+        user_prompt = f"CONSULTA DE INVESTIGACIÓN: {query}{history_block}{context_block}{grounding}"
+
+        citations: list[dict] = []
+        # ── Orquestador: pedido de gráfico/visualización → analista GPT ──
+        if _CHART_INTENT.search(query):
+            answer, citations, cost_usd, engine_used = await _chart_task(
+                query, history_block, context_block, project_id
+            )
+        elif engine == "perplexity":
+            if not settings.perplexity_enabled:
+                raise HTTPException(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Perplexity no está configurado: cargá PERPLEXITY_API_KEY en el .env.",
+                )
+            answer, citations, cost_usd = await _perplexity_research(user_prompt)
+        else:
+            if not settings.openai_api_key:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
+            from openai import AsyncOpenAI
+
+            from ...services.agent.pricing import compute_cost_usd
+
+            client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180)
+            resp = await client.responses.create(
+                model=settings.agent_model,
+                tools=[{"type": "web_search"}],
+                instructions=_RESEARCH_SYSTEM,
+                input=user_prompt,
+            )
+            answer = (getattr(resp, "output_text", "") or "").strip()
+            usage = getattr(resp, "usage", None)
+            if usage:
+                cost_usd = compute_cost_usd(
+                    int(getattr(usage, "input_tokens", 0) or 0),
+                    int(getattr(usage, "output_tokens", 0) or 0),
+                )
+            try:
+                for item in getattr(resp, "output", []) or []:
+                    for content in getattr(item, "content", []) or []:
+                        for ann in getattr(content, "annotations", []) or []:
+                            if getattr(ann, "type", "") == "url_citation":
+                                citations.append({
+                                    "url": getattr(ann, "url", ""),
+                                    "title": getattr(ann, "title", "") or getattr(ann, "url", ""),
+                                })
+            except Exception:
+                pass
+
+        # Fallback: enlaces markdown de la respuesta como citas
+        if not citations and answer:
+            import re as _re
+
+            for title, url in _re.findall(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", answer):
+                citations.append({"url": url, "title": title})
+
+        seen: set[str] = set()
+        for c in citations:
+            url = c.get("url") or ""
+            if url and url not in seen:
+                seen.add(url)
+                unique_citations.append(c)
+
+        answer = _clean_answer(answer)
+        answer = _linkify_citations(answer, unique_citations)
+    except HTTPException as exc:
+        error = str(exc.detail)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("research job %s falló", message_id)
+        error = f"Error inesperado: {str(exc)[:300]}"
+
+    try:
+        async with session_scope() as db:
+            message = await db.get(Message, message_id)
+            if not message:
+                return
+            if error:
+                message.content = f"**La investigación falló:** {error}"
+                message.tool_calls = {"status": "failed", "engine": engine_used}
+            else:
+                message.content = answer
+                message.tool_calls = {
+                    "status": "done", "citations": unique_citations, "engine": engine_used,
+                }
+                message.cost_usd = cost_usd or None
+            conversation = await db.get(Conversation, conversation_id)
+            if conversation:
+                conversation.updated_at = datetime.now(timezone.utc)
+            await log_action(
+                db, user_id=user_info["id"], user_email=user_info.get("email"),
+                user_role=user_info.get("role"), action="agent.research",
+                project_id=project_id, entity_type="research", entity_id=conversation_id,
+                detail={"engine": engine_used, "query": query[:120],
+                        "status": "failed" if error else "done"},
+                ip=ip, commit=False,
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("research job %s: no se pudo persistir el resultado", message_id)

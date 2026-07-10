@@ -96,10 +96,12 @@ export default function DocumentPage() {
 
   // ---- Hilo del investigador (memoria persistente) ----
   interface ResearchTurn {
+    id?: string;
     role: "user" | "assistant";
     content: string;
     citations?: { url: string; title: string }[];
     engine?: string;
+    status?: "running" | "done" | "failed";
   }
   const [convId, setConvId] = useState<string | null>(null);
   const [convList, setConvList] = useState<{ id: string; title: string; updated_at: string }[]>([]);
@@ -163,19 +165,44 @@ export default function DocumentPage() {
     }
   };
 
+  const watchIdsRef = useRef<Set<string>>(new Set()); // investigaciones lanzadas por mí, pendientes de abrir en lectura
+
   const loadThread = useCallback(async (conversationId: string) => {
     setConvId(conversationId);
     setPanelError("");
     const msgs = await apiFetch<any[]>(`/api/v1/agent/conversations/${conversationId}/messages`);
-    setThread(
-      msgs.map((m) => ({
-        role: m.role,
-        content: m.role === "assistant" ? cleanMd(m.content) : m.content,
-        citations: m.tool_calls?.citations,
-        engine: m.tool_calls?.engine,
-      }))
-    );
+    const turns: ResearchTurn[] = msgs.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.role === "assistant" ? cleanMd(m.content) : m.content,
+      citations: m.tool_calls?.citations,
+      engine: m.tool_calls?.engine,
+      status:
+        m.role === "assistant"
+          ? (m.tool_calls?.status ?? (m.content ? "done" : "running"))
+          : undefined,
+    }));
+    setThread(turns);
+    // Si una investigación que lancé terminó, abrirla en modo lectura
+    for (const t of turns) {
+      if (t.id && watchIdsRef.current.has(t.id) && t.status && t.status !== "running") {
+        watchIdsRef.current.delete(t.id);
+        if (t.status === "done") setReader(t);
+      }
+    }
+    return turns;
   }, []);
+
+  // Polling mientras haya investigaciones corriendo (el trabajo vive en el
+  // servidor: se puede navegar y volver, el hilo se actualiza solo)
+  const hasRunning = thread.some((t) => t.status === "running");
+  useEffect(() => {
+    if (!convId || !hasRunning) return;
+    const interval = setInterval(() => {
+      loadThread(convId).catch(() => {});
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [convId, hasRunning, loadThread]);
 
   const loadConvList = useCallback(async (): Promise<any[]> => {
     const convs = await apiFetch<any[]>(
@@ -305,14 +332,6 @@ export default function DocumentPage() {
     const info = editorRef.current?.getContextInfo();
     setAiLoading(true);
     setPanelError("");
-    const isChart = /gr[aá]fic|chart|visualiz|diagrama|barras|torta|plot/i.test(query);
-    setAiLoadingLabel(
-      isChart
-        ? "El analista está preparando el gráfico con los datos del hilo…"
-        : engine === "perplexity"
-          ? "VEX Consulting IA investigando… (hasta 1 minuto)"
-          : "IA tradicional investigando… (hasta 1 minuto)"
-    );
     setThread((t) => [...t, { role: "user", content: query }]);
     setAiQuery("");
     try {
@@ -331,19 +350,18 @@ export default function DocumentPage() {
       setAttachments([]);
       const isNewConversation = !convId;
       setConvId(res.conversation_id);
-      const turn: ResearchTurn = {
-        role: "assistant",
-        content: cleanMd(res.answer),
-        citations: res.citations,
-        engine: res.engine,
-      };
-      setThread((t) => [...t, turn]);
-      setReader(turn); // abrir en modo lectura amplio automáticamente
+      // La investigación quedó registrada y corre en el servidor: el hilo
+      // muestra el estado y el polling trae el resultado (aunque navegues).
+      watchIdsRef.current.add(res.message_id);
+      setThread((t) => [
+        ...t,
+        { id: res.message_id, role: "assistant", content: "", engine, status: "running" },
+      ]);
       if (isNewConversation) loadConvList().catch(() => {});
     } catch (e: any) {
       setThread((t) => t.slice(0, -1));
       setAiQuery(query); // devolver el texto para reintentar
-      setPanelError(e.message || "No se pudo completar la investigación");
+      setPanelError(e.message || "No se pudo iniciar la investigación");
     } finally {
       setAiLoading(false);
     }
@@ -508,38 +526,54 @@ export default function DocumentPage() {
                         </div>
                       </div>
                     ) : (
-                      <div key={i} className="rounded-lg bg-brand-bg p-3 animate-pop">
+                      <div key={t.id ?? i} className="rounded-lg bg-brand-bg p-3 animate-pop">
                         <div className="flex items-center gap-1.5 mb-1.5">
                           <span className={engineBadge(t.engine).cls}>
                             {engineBadge(t.engine).label}
                           </span>
+                          {t.status === "failed" && <span className="badge-primary">falló</span>}
                           {t.citations && t.citations.length > 0 && (
                             <span className="text-[10px] text-brand-slate">
                               {t.citations.length} fuentes
                             </span>
                           )}
                         </div>
-                        <div className="prose-vex !text-[13.5px] !leading-relaxed max-h-80 overflow-y-auto pr-1.5 [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {splitSources(t.content)}
-                          </ReactMarkdown>
-                        </div>
-                        <div className="flex gap-1.5 mt-2">
-                          <button
-                            className="btn-secondary !py-1 text-xs flex-1"
-                            onClick={() => setReader(t)}
-                          >
-                            📖 Leer completo y fuentes
-                          </button>
-                          {editable && (
-                            <button
-                              className="btn-primary !py-1 text-xs flex-1"
-                              onClick={() => insertText(t.content)}
-                            >
-                              ⤵ Insertar
-                            </button>
-                          )}
-                        </div>
+                        {t.status === "running" ? (
+                          <div className="py-2 space-y-1.5">
+                            <div className="shimmer-text text-sm font-semibold">
+                              Investigando en el servidor… podés navegar por la app y volver:
+                              el resultado queda guardado en este hilo.
+                            </div>
+                            <div className="shimmer-bar h-2 rounded" />
+                            <div className="shimmer-bar h-2 rounded w-4/5" />
+                          </div>
+                        ) : (
+                          <>
+                            <div className="prose-vex !text-[13.5px] !leading-relaxed max-h-80 overflow-y-auto pr-1.5 [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {splitSources(t.content)}
+                              </ReactMarkdown>
+                            </div>
+                            {t.status !== "failed" && (
+                              <div className="flex gap-1.5 mt-2">
+                                <button
+                                  className="btn-secondary !py-1 text-xs flex-1"
+                                  onClick={() => setReader(t)}
+                                >
+                                  📖 Leer completo y fuentes
+                                </button>
+                                {editable && (
+                                  <button
+                                    className="btn-primary !py-1 text-xs flex-1"
+                                    onClick={() => insertText(t.content)}
+                                  >
+                                    ⤵ Insertar
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                     )
                   )}
@@ -584,36 +618,38 @@ export default function DocumentPage() {
                         )}
                       </div>
                     )}
-                    <div className="flex gap-1.5 items-end">
-                      <div className="flex flex-col gap-1">
-                        <button
-                          className="btn-ghost !px-2 !py-1"
-                          title="Adjuntar imagen o audio: se analiza con IA y queda guardado como fuente"
-                          disabled={aiLoading || attaching}
-                          onClick={() => attachInputRef.current?.click()}
-                        >
-                          📎
-                        </button>
-                        <button
-                          className={`btn-ghost !px-2 !py-1 ${recording ? "!bg-brand-primary !text-white" : ""}`}
-                          title="Nota de voz: grabá tu consulta o datos, se transcribe y se guarda como fuente"
-                          disabled={aiLoading || attaching}
-                          onClick={toggleRecording}
-                        >
-                          🎙
-                        </button>
-                        <input
-                          ref={attachInputRef}
-                          type="file"
-                          className="hidden"
-                          accept="image/*,audio/*,.mp3,.m4a,.wav,.webm,.ogg"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) uploadAttachment(f);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </div>
+                    <div className="flex gap-2 items-end">
+                      <button
+                        className="h-11 w-11 shrink-0 rounded-md border border-brand-border bg-white text-xl leading-none flex items-center justify-center transition-colors hover:border-brand-primary hover:text-brand-primary disabled:opacity-40"
+                        title="Adjuntar imagen o audio: se analiza con IA y queda guardado como fuente"
+                        disabled={aiLoading || attaching}
+                        onClick={() => attachInputRef.current?.click()}
+                      >
+                        📎
+                      </button>
+                      <button
+                        className={`h-11 w-11 shrink-0 rounded-md border text-xl leading-none flex items-center justify-center transition-colors disabled:opacity-40 ${
+                          recording
+                            ? "bg-brand-primary border-brand-primary text-white animate-pulse"
+                            : "border-brand-border bg-white hover:border-brand-primary hover:text-brand-primary"
+                        }`}
+                        title="Nota de voz: grabá tu consulta o datos, se transcribe y se guarda como fuente"
+                        disabled={aiLoading || attaching}
+                        onClick={toggleRecording}
+                      >
+                        🎙
+                      </button>
+                      <input
+                        ref={attachInputRef}
+                        type="file"
+                        className="hidden"
+                        accept="image/*,audio/*,.mp3,.m4a,.wav,.webm,.ogg"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) uploadAttachment(f);
+                          e.currentTarget.value = "";
+                        }}
+                      />
                       <textarea
                         className="input !py-2 text-[13px] resize-none flex-1"
                         rows={2}
