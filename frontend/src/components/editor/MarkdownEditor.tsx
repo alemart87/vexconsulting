@@ -23,6 +23,10 @@ interface Props {
 
 export interface EditorHandle {
   getMarkdown: () => string;
+  /** Selección actual o texto anterior al cursor (contexto para la IA) + ancla de inserción. */
+  getContextInfo: () => { context: string; anchor: number };
+  /** Inserta Markdown en la última posición del cursor (con salto de párrafo). */
+  insertAtCursor: (text: string) => void;
 }
 
 function ToolbarButton({
@@ -88,6 +92,22 @@ export default function MarkdownEditor({
     if (editorRef) {
       editorRef.current = {
         getMarkdown: () => (editor?.storage as any)?.markdown?.getMarkdown() ?? "",
+        getContextInfo: () => {
+          if (!editor) return { context: "", anchor: 0 };
+          const { from, to } = editor.state.selection;
+          const selected = editor.state.doc.textBetween(from, to, "\n");
+          const before = editor.state.doc.textBetween(0, from, "\n");
+          const md = (editor.storage as any)?.markdown?.getMarkdown() ?? "";
+          return {
+            context: selected || before.slice(-2500) || md.slice(0, 2500),
+            anchor: to,
+          };
+        },
+        insertAtCursor: (text: string) => {
+          if (!editor) return;
+          const pos = Math.min(editor.state.selection.to, editor.state.doc.content.size);
+          editor.chain().focus().insertContentAt(pos, `\n\n${text}`).run();
+        },
       };
     }
   }, [editor, editorRef]);

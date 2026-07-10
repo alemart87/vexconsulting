@@ -23,9 +23,10 @@ interface Props {
   viewerMode?: boolean;
   roleSlug?: string;
   onProposal?: (p: Proposal) => void;
+  heightClass?: string;
 }
 
-export default function AgentChat({ projectId, viewerMode, roleSlug, onProposal }: Props) {
+export default function AgentChat({ projectId, viewerMode, roleSlug, onProposal, heightClass }: Props) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -136,7 +137,7 @@ export default function AgentChat({ projectId, viewerMode, roleSlug, onProposal 
   };
 
   return (
-    <div className="card flex flex-col h-[72vh]">
+    <div className={`card flex flex-col ${heightClass ?? "h-[72vh]"}`}>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
           <div className="text-center text-sm text-brand-slate pt-16">
