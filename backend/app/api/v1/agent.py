@@ -1,0 +1,311 @@
+"""Agentes de IA: conversaciones por proyecto con streaming SSE.
+
+- acompanante: consultores con permiso read+ en el proyecto.
+- visualizador: solo el documento publicado (tools restringidas).
+- Autocompletado corto para el editor (sin conversación).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...core.config import settings
+from ...core.database import get_db, session_scope
+from ...models.conversation import Conversation, Message
+from ...services.agent.context import AgentContext
+from ...services.agent.core import (
+    AgentNotConfigured,
+    build_companion_agent,
+    build_viewer_agent,
+    stream_agent,
+)
+from ...services.agent.pricing import compute_cost_usd
+from ...services.agent.roles import DEFAULT_ROLE, list_roles
+from ...services.audit_service import log_action
+from ..deps import ProjectAccess, client_ip, require_project_read, require_project_write
+
+logger = logging.getLogger("vexconsulting")
+
+router = APIRouter(tags=["agent"])
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+
+class ConversationCreate(BaseModel):
+    role_slug: str | None = None
+
+
+class MessageCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=20000)
+
+
+class SuggestRequest(BaseModel):
+    context_text: str = Field(min_length=1, max_length=12000)
+    instruction: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/agent/roles")
+async def get_roles() -> list[dict]:
+    return list_roles()
+
+
+@router.get("/projects/{project_id}/agent/conversations")
+async def list_conversations(
+    project_id: str,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    agent_type = "visualizador" if access.user.is_visualizador else "acompanante"
+    result = await db.execute(
+        select(Conversation)
+        .where(
+            Conversation.project_id == project_id,
+            Conversation.user_id == access.user.id,
+            Conversation.agent_type == agent_type,
+        )
+        .order_by(Conversation.updated_at.desc())
+        .limit(50)
+    )
+    return [
+        {"id": c.id, "title": c.title, "role_slug": c.role_slug,
+         "agent_type": c.agent_type, "updated_at": c.updated_at}
+        for c in result.scalars().all()
+    ]
+
+
+@router.post("/projects/{project_id}/agent/conversations", status_code=status.HTTP_201_CREATED)
+async def create_conversation(
+    project_id: str,
+    payload: ConversationCreate,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    agent_type = "visualizador" if access.user.is_visualizador else "acompanante"
+    conv = Conversation(
+        user_id=access.user.id,
+        project_id=project_id,
+        agent_type=agent_type,
+        role_slug=payload.role_slug or access.project.agent_role_slug or DEFAULT_ROLE,
+    )
+    db.add(conv)
+    await db.commit()
+    await db.refresh(conv)
+    return {"id": conv.id, "title": conv.title, "role_slug": conv.role_slug,
+            "agent_type": conv.agent_type}
+
+
+@router.get("/agent/conversations/{conv_id}/messages")
+async def get_messages(
+    conv_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    conv = await _own_conversation(conv_id, request, db)
+    result = await db.execute(
+        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
+    )
+    return [
+        {"id": m.id, "role": m.role, "content": m.content, "reasoning": m.reasoning,
+         "tool_calls": m.tool_calls, "cost_usd": float(m.cost_usd or 0),
+         "created_at": m.created_at}
+        for m in result.scalars().all()
+    ]
+
+
+@router.delete("/agent/conversations/{conv_id}")
+async def delete_conversation(
+    conv_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    conv = await _own_conversation(conv_id, request, db)
+    await db.delete(conv)
+    await db.commit()
+    return {"ok": True}
+
+
+async def _own_conversation(conv_id: str, request: Request, db: AsyncSession) -> Conversation:
+    """Carga la conversación y valida que pertenezca al usuario autenticado."""
+    from ..deps import get_current_user, bearer
+
+    creds = await bearer(request)
+    user = await get_current_user(request, creds, db)
+    conv = await db.get(Conversation, conv_id)
+    if not conv or (conv.user_id != user.id and not user.is_superadmin):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversación no encontrada")
+    return conv
+
+
+@router.post("/projects/{project_id}/agent/conversations/{conv_id}/messages")
+async def send_message(
+    project_id: str,
+    conv_id: str,
+    payload: MessageCreate,
+    request: Request,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+):
+    conv = await db.get(Conversation, conv_id)
+    if not conv or conv.project_id != project_id or conv.user_id != access.user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversación no encontrada")
+
+    text = payload.content.strip()
+    project = access.project
+
+    db.add(Message(conversation_id=conv_id, role="user", content=text))
+    if not conv.title:
+        conv.title = text[:60]
+    await db.commit()
+
+    rows = await db.execute(
+        select(Message).where(Message.conversation_id == conv_id)
+        .order_by(Message.created_at.desc()).limit(settings.agent_max_history)
+    )
+    history = list(reversed(rows.scalars().all()))
+    messages = [{"role": m.role, "content": m.content} for m in history if m.content]
+
+    is_viewer = access.user.is_visualizador or conv.agent_type == "visualizador"
+    context = AgentContext(
+        user_id=access.user.id,
+        user_name=access.user.full_name,
+        project_id=project_id,
+        agent_type="visualizador" if is_viewer else "acompanante",
+        published_version_id=project.published_version_id,
+    )
+
+    def _build():
+        if is_viewer:
+            return build_viewer_agent(project)
+        return build_companion_agent(project, conv.role_slug)
+
+    uid, uemail, urole = access.user.id, access.user.email, access.user.role
+    ip = client_ip(request)
+
+    async def event_stream():
+        # Padding anti-buffering de proxies + heartbeats (patrón de referencia).
+        yield ":" + (" " * 2048) + "\n\n"
+        yield _sse({"type": "start"})
+
+        final: dict = {}
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _produce():
+            try:
+                agent = _build()
+                async for ev in stream_agent(messages, context, agent):
+                    await queue.put(("ev", ev))
+            except AgentNotConfigured as exc:
+                await queue.put(("err", str(exc)))
+            except Exception as exc:  # noqa: BLE001
+                if exc.__class__.__name__ == "MaxTurnsExceeded":
+                    await queue.put(("err", "La consulta requirió demasiados pasos. Probá acotarla."))
+                else:
+                    logger.exception("agent error conv=%s", conv_id)
+                    await queue.put(("err", "Ocurrió un error procesando la consulta."))
+            finally:
+                await queue.put(("end", None))
+
+        producer = asyncio.create_task(_produce())
+        failed = False
+        while True:
+            try:
+                kind, data = await asyncio.wait_for(queue.get(), timeout=2.0)
+            except asyncio.TimeoutError:
+                yield ": hb\n\n"
+                continue
+            if kind == "end":
+                break
+            if kind == "err":
+                failed = True
+                yield _sse({"type": "error", "message": data})
+                continue
+            if data["type"] == "done":
+                final = data
+            yield _sse(data)
+        await producer
+
+        if failed:
+            return
+        try:
+            usage = final.get("usage", {}) or {}
+            async with session_scope() as s:
+                s.add(Message(
+                    conversation_id=conv_id,
+                    role="assistant",
+                    content=final.get("content", ""),
+                    reasoning=final.get("reasoning") or None,
+                    tool_calls={"trace": final.get("tool_trace", []),
+                                "proposals": final.get("proposals", [])},
+                    input_tokens=usage.get("input_tokens", 0),
+                    cached_tokens=usage.get("cached_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                    reasoning_tokens=usage.get("reasoning_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                    cost_usd=compute_cost_usd(
+                        usage.get("input_tokens", 0), usage.get("output_tokens", 0),
+                        usage.get("cached_tokens", 0),
+                    ),
+                ))
+                c = await s.get(Conversation, conv_id)
+                if c:
+                    c.updated_at = datetime.now(timezone.utc)
+                await log_action(
+                    s, user_id=uid, user_email=uemail, user_role=urole,
+                    action="agent.chat", project_id=project_id,
+                    entity_type="conversation", entity_id=conv_id,
+                    detail={"tools": [t.get("tool") for t in final.get("tool_trace", [])]},
+                    ip=ip, commit=False,
+                )
+                await s.commit()
+        except Exception:
+            logger.exception("No se pudo persistir la respuesta del agente")
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+    })
+
+
+@router.post("/projects/{project_id}/agent/suggest")
+async def suggest_text(
+    project_id: str,
+    payload: SuggestRequest,
+    access: ProjectAccess = Depends(require_project_write),
+) -> dict:
+    """Autocompletado corto para el editor: continúa o mejora el texto dado.
+    Llamada directa (sin agente ni tools) para latencia baja."""
+    if not settings.openai_api_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
+
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    instruction = payload.instruction or (
+        "Continuá el texto de forma natural, en el mismo registro y en español, "
+        "con 1 a 3 oraciones sobrias de informe de investigación. Si el texto "
+        "termina a mitad de una idea, completala."
+    )
+    resp = await client.chat.completions.create(
+        model=settings.agent_model,
+        max_completion_tokens=400,
+        messages=[
+            {
+                "role": "system",
+                "content": "Sos un asistente de redacción de informes de investigación "
+                "de mercado en español, registro institucional sobrio. Respondé SOLO "
+                "con el texto sugerido en Markdown, sin preámbulos.",
+            },
+            {"role": "user", "content": f"{instruction}\n\n---\n{payload.context_text}"},
+        ],
+    )
+    suggestion = (resp.choices[0].message.content or "").strip()
+    return {"suggestion": suggestion}

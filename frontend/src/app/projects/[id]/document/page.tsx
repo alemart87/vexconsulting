@@ -29,6 +29,9 @@ export default function DocumentPage() {
   const [status, setStatus] = useState("");
   const [conflict, setConflict] = useState(false);
   const [summary, setSummary] = useState("");
+  const [aiSuggestion, setAiSuggestion] = useState<string>("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const insertFnRef = useRef<((text: string) => void) | null>(null);
   const lockTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canWrite =
@@ -162,12 +165,58 @@ export default function DocumentPage() {
       </div>
       {status && <div className="text-xs text-emerald-700">{status}</div>}
 
+      {(aiSuggestion || aiLoading) && (
+        <div className="card p-4 border-brand-cyan/50 animate-pop">
+          <div className="label !text-brand-cyan mb-2">✨ Sugerencia de IA</div>
+          {aiLoading ? (
+            <div className="shimmer-text text-sm font-semibold">Redactando sugerencia…</div>
+          ) : (
+            <>
+              <pre className="text-sm whitespace-pre-wrap bg-brand-bg-soft rounded p-3 max-h-48 overflow-y-auto">
+                {aiSuggestion}
+              </pre>
+              <div className="flex gap-2 mt-2">
+                <button
+                  className="btn-primary !py-1.5 text-xs"
+                  onClick={() => {
+                    insertFnRef.current?.(aiSuggestion);
+                    setAiSuggestion("");
+                    setDirty(true);
+                  }}
+                >
+                  Insertar en el documento
+                </button>
+                <button className="btn-ghost text-xs" onClick={() => setAiSuggestion("")}>
+                  Descartar
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <MarkdownEditor
         projectId={params.id}
         initialMarkdown={doc.content_md}
         editable={editable}
         onDirty={setDirty}
         editorRef={editorRef}
+        onRequestAi={async (contextText, insert) => {
+          insertFnRef.current = insert;
+          setAiLoading(true);
+          setAiSuggestion("");
+          try {
+            const res = await apiFetch<{ suggestion: string }>(
+              `/api/v1/projects/${params.id}/agent/suggest`,
+              { method: "POST", body: JSON.stringify({ context_text: contextText }) }
+            );
+            setAiSuggestion(res.suggestion);
+          } catch (e: any) {
+            setStatus(`IA: ${e.message}`);
+          } finally {
+            setAiLoading(false);
+          }
+        }}
       />
     </div>
   );
