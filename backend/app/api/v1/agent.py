@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -59,11 +59,147 @@ class ResearchRequest(BaseModel):
     context_text: str | None = Field(default=None, max_length=12000)
     engine: str = "perplexity"  # perplexity («VEX Consulting IA») | openai («IA tradicional»)
     conversation_id: str | None = None  # hilo de investigación con memoria (30 mensajes)
+    attachment_source_ids: list[str] | None = None  # adjuntos de esta consulta (ya indexados)
 
 
 @router.get("/agent/roles")
 async def get_roles() -> list[dict]:
     return list_roles()
+
+
+_AUDIO_EXTS = (".mp3", ".m4a", ".wav", ".webm", ".ogg", ".mp4", ".mpeg", ".mpga")
+
+
+@router.post("/projects/{project_id}/agent/attach", status_code=status.HTTP_201_CREATED)
+async def attach_for_research(
+    project_id: str,
+    file: UploadFile,
+    request: Request,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Entrada multimodal del investigador: imagen (visión) o audio/nota de voz
+    (transcripción). Se procesa al instante, queda GUARDADO como fuente del
+    proyecto (indexada para RAG) y se puede citar en la consulta en curso."""
+    import hashlib
+    import uuid as _uuid
+
+    if not settings.openai_api_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "IA no configurada en el servidor")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Archivo vacío")
+    if len(data) > settings.max_upload_size_mb * 1024 * 1024:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"Máximo {settings.max_upload_size_mb} MB",
+        )
+
+    filename = (file.filename or "adjunto").replace("/", "_").replace("\\", "_")
+    mime = (file.content_type or "").lower()
+    lower = filename.lower()
+    is_image = mime.startswith("image/")
+    is_audio = mime.startswith("audio/") or mime.startswith("video/webm") or lower.endswith(_AUDIO_EXTS)
+
+    if not (is_image or is_audio):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Este adjunto acepta imágenes y audio/notas de voz. Para documentos "
+            "(PDF, Word, Excel) usá la pestaña Fuentes: se indexan igual.",
+        )
+
+    # Extraer contenido con IA
+    if is_image:
+        from ...services.rag.extractors import _vision_image_text
+
+        extracted = _vision_image_text(data, mime or "image/png")
+        kind_label = "imagen"
+    else:
+        import io
+
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=300)
+        buffer = io.BytesIO(data)
+        buffer.name = filename if "." in filename else f"{filename}.webm"
+        try:
+            tr = await client.audio.transcriptions.create(model="gpt-4o-transcribe", file=buffer)
+        except Exception:
+            buffer.seek(0)
+            tr = await client.audio.transcriptions.create(model="whisper-1", file=buffer)
+        extracted = (getattr(tr, "text", "") or "").strip()
+        kind_label = "nota de voz"
+
+    if not extracted:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"La IA no reconoció contenido en la {kind_label}. Verificá calidad/nitidez y reintentá.",
+        )
+
+    # Guardar archivo + fuente indexada (lista para RAG al instante)
+    source_id = str(_uuid.uuid4())
+    folder = settings.upload_path / project_id / "sources" / source_id
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / filename).write_bytes(data)
+
+    from ...models.source import Source
+    from ...models.source_chunk import SourceChunk
+    from ...services.rag.chunker import chunk_sections
+    from ...services.rag.embedder import embed_texts
+
+    chunks = chunk_sections(
+        [{"text": extracted, "meta": {"ocr": is_image, "transcripcion": is_audio}}],
+        settings.max_chunks_per_source,
+    )
+    embeddings = None
+    embed_cost = 0.0
+    try:
+        embeddings, embed_cost = await embed_texts([c["content"] for c in chunks])
+    except Exception:
+        pass
+
+    source = Source(
+        id=source_id,
+        project_id=project_id,
+        kind="file",
+        title=f"{'📷 ' if is_image else '🎙 '}{filename}",
+        original_filename=filename,
+        mime_type=mime or None,
+        sha256=hashlib.sha256(data).hexdigest(),
+        stored_path=str(folder / filename),
+        size_bytes=len(data),
+        status="ready",
+        extracted_chars=len(extracted),
+        chunk_count=len(chunks),
+        embedding_cost_usd=embed_cost or None,
+        uploaded_by=access.user.id,
+        uploaded_by_name=f"{access.user.full_name} (vía investigador)",
+    )
+    db.add(source)
+    for idx, chunk in enumerate(chunks):
+        db.add(SourceChunk(
+            source_id=source_id,
+            project_id=project_id,
+            chunk_index=idx,
+            content=chunk["content"],
+            embedding=embeddings[idx] if embeddings else None,
+            meta=chunk["meta"] or None,
+            token_count=chunk["token_count"],
+        ))
+    await log_action(
+        db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
+        action="source.attach", project_id=project_id, entity_type="source",
+        entity_id=source_id, detail={"tipo": kind_label, "archivo": filename},
+        ip=client_ip(request),
+    )
+    return {
+        "source_id": source_id,
+        "title": source.title,
+        "kind": kind_label,
+        "extracted_chars": len(extracted),
+        "preview": extracted[:400],
+    }
 
 
 @router.get("/agent/capabilities")
@@ -641,18 +777,73 @@ async def _chart_task(
     return "\n".join(parts).strip(), [], cost, "analista"
 
 
-async def _project_grounding(db: AsyncSession, project_id: str, query: str) -> str:
+async def _project_grounding(
+    db: AsyncSession, project_id: str, query: str,
+    attachment_source_ids: list[str] | None = None,
+) -> str:
+    from sqlalchemy import select as _select
+
+    from ...models.source import Source
+    from ...models.source_chunk import SourceChunk
     from ...services.rag.retriever import format_citation, search_chunks
 
+    parts: list[str] = []
+
+    # Catálogo: el investigador conoce la base de conocimiento del proyecto
     try:
-        chunks = await search_chunks(db, project_id, query, k=4)
+        catalog = await db.execute(
+            _select(Source.title).where(
+                Source.project_id == project_id, Source.status == "ready"
+            ).limit(20)
+        )
+        titles = [t for (t,) in catalog]
+        if titles:
+            parts.append(
+                "FUENTES INTERNAS DISPONIBLES EN EL PROYECTO: " + " · ".join(titles)
+            )
     except Exception:
-        return ""
-    if not chunks:
-        return ""
-    return "\n\nFUENTES INTERNAS DEL PROYECTO (citá con el formato dado):\n" + "\n\n".join(
-        f"{format_citation(c)}\n{c['content'][:800]}" for c in chunks
-    )
+        pass
+
+    # Material adjuntado explícitamente en esta consulta: entra COMPLETO (con tope)
+    if attachment_source_ids:
+        try:
+            rows = await db.execute(
+                _select(SourceChunk, Source.title)
+                .join(Source, Source.id == SourceChunk.source_id)
+                .where(
+                    SourceChunk.source_id.in_(attachment_source_ids[:5]),
+                    SourceChunk.project_id == project_id,
+                )
+                .order_by(SourceChunk.source_id, SourceChunk.chunk_index)
+            )
+            budget = 9000
+            attached_parts = []
+            for chunk, title in rows:
+                if budget <= 0:
+                    break
+                fragment = chunk.content[:budget]
+                attached_parts.append(f"[{title}]\n{fragment}")
+                budget -= len(fragment)
+            if attached_parts:
+                parts.append(
+                    "MATERIAL ADJUNTADO POR EL CONSULTOR EN ESTA CONSULTA (analizalo y citalo):\n"
+                    + "\n\n".join(attached_parts)
+                )
+        except Exception:
+            pass
+
+    # Fragmentos afines a la consulta (RAG híbrido)
+    try:
+        chunks = await search_chunks(db, project_id, query, k=6)
+        if chunks:
+            parts.append(
+                "FRAGMENTOS DE FUENTES INTERNAS AFINES A LA CONSULTA (citá con el formato dado):\n"
+                + "\n\n".join(f"{format_citation(c)}\n{c['content'][:800]}" for c in chunks)
+            )
+    except Exception:
+        pass
+
+    return ("\n\n" + "\n\n".join(parts)) if parts else ""
 
 
 @router.post("/projects/{project_id}/agent/research")
@@ -689,7 +880,9 @@ async def research(
         await db.flush()
 
     history_block = await _load_research_history(db, conversation.id)
-    grounding = await _project_grounding(db, project_id, payload.query)
+    grounding = await _project_grounding(
+        db, project_id, payload.query, payload.attachment_source_ids
+    )
     context_block = (
         f"\n\nCONTEXTO DEL DOCUMENTO EN EDICIÓN:\n{payload.context_text[-4000:]}"
         if payload.context_text

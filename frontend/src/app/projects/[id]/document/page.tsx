@@ -109,6 +109,60 @@ export default function DocumentPage() {
   const [panelError, setPanelError] = useState("");
   const threadEndRef = useRef<HTMLDivElement>(null);
 
+  // ---- Multimodal: adjuntos (imagen/voz) del investigador ----
+  const [attachments, setAttachments] = useState<{ source_id: string; title: string }[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+
+  const uploadAttachment = async (file: File) => {
+    setAttaching(true);
+    setPanelError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await apiFetch<any>(`/api/v1/projects/${params.id}/agent/attach`, {
+        method: "POST",
+        body: form,
+      });
+      setAttachments((a) => [...a, { source_id: res.source_id, title: res.title }]);
+    } catch (e: any) {
+      setPanelError(`Adjunto: ${e.message}`);
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      recordChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const blob = new Blob(recordChunksRef.current, { type: "audio/webm" });
+        if (blob.size > 2000) {
+          uploadAttachment(new File([blob], `nota-voz-${Date.now()}.webm`, { type: "audio/webm" }));
+        }
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setPanelError("No se pudo acceder al micrófono (revisá permisos del navegador).");
+    }
+  };
+
   const loadThread = useCallback(async (conversationId: string) => {
     setConvId(conversationId);
     setPanelError("");
@@ -269,8 +323,12 @@ export default function DocumentPage() {
           context_text: info?.context || undefined,
           engine,
           conversation_id: convId || undefined,
+          attachment_source_ids: attachments.length
+            ? attachments.map((a) => a.source_id)
+            : undefined,
         }),
       });
+      setAttachments([]);
       const isNewConversation = !convId;
       setConvId(res.conversation_id);
       const turn: ResearchTurn = {
@@ -498,7 +556,64 @@ export default function DocumentPage() {
 
                 {editable && (
                   <>
+                    {(attachments.length > 0 || attaching || recording) && (
+                      <div className="flex gap-1.5 flex-wrap items-center">
+                        {attachments.map((a) => (
+                          <span key={a.source_id} className="badge-cyan !normal-case flex items-center gap-1">
+                            {a.title.slice(0, 32)}
+                            <button
+                              className="hover:text-brand-primary"
+                              onClick={() =>
+                                setAttachments((prev) => prev.filter((x) => x.source_id !== a.source_id))
+                              }
+                              title="Quitar de esta consulta (queda guardado en Fuentes)"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        {attaching && (
+                          <span className="shimmer-text text-[11px] font-semibold">
+                            Procesando adjunto con IA…
+                          </span>
+                        )}
+                        {recording && (
+                          <span className="text-[11px] font-semibold text-brand-primary animate-pulse">
+                            ● Grabando… tocá 🎙 para terminar
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex gap-1.5 items-end">
+                      <div className="flex flex-col gap-1">
+                        <button
+                          className="btn-ghost !px-2 !py-1"
+                          title="Adjuntar imagen o audio: se analiza con IA y queda guardado como fuente"
+                          disabled={aiLoading || attaching}
+                          onClick={() => attachInputRef.current?.click()}
+                        >
+                          📎
+                        </button>
+                        <button
+                          className={`btn-ghost !px-2 !py-1 ${recording ? "!bg-brand-primary !text-white" : ""}`}
+                          title="Nota de voz: grabá tu consulta o datos, se transcribe y se guarda como fuente"
+                          disabled={aiLoading || attaching}
+                          onClick={toggleRecording}
+                        >
+                          🎙
+                        </button>
+                        <input
+                          ref={attachInputRef}
+                          type="file"
+                          className="hidden"
+                          accept="image/*,audio/*,.mp3,.m4a,.wav,.webm,.ogg"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) uploadAttachment(f);
+                            e.currentTarget.value = "";
+                          }}
+                        />
+                      </div>
                       <textarea
                         className="input !py-2 text-[13px] resize-none flex-1"
                         rows={2}
