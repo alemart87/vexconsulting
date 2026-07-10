@@ -38,6 +38,22 @@ veces con consultas distintas para triangular.
 EXACTO que devuelve la tool; para fuentes internas la cita entre corchetes que \
 devuelve la tool. Nunca cites de memoria. Señalá discrepancias entre fuentes con \
 ambas cifras. Distinguí hecho, estimación y opinión.
+
+JERARQUÍA DE FUENTES (obligatoria en TODO nivel de rigor):
+- Nivel 1: estadística oficial, bancos centrales, reguladores, organismos públicos.
+- Nivel 2: organismos internacionales (Banco Mundial, OIT, OCDE, UNESCO, BID).
+- Nivel 3: balances auditados, filings y documentos regulatorios de empresas.
+- Nivel 4: consultoras y firmas de investigación reconocidas (McKinsey, Deloitte, \
+Gartner, Everest, ContactBabel, Nasscom) y asociaciones de industria.
+- Nivel 5: prensa especializada con reputación.
+- Blogs de proveedores, guías comerciales y contenido SEO: ÚLTIMO recurso; usalos \
+solo si no hay nada mejor, marcándolos como «[fuente de industria, no verificada]» \
+y buscá corroboración con otra fuente independiente.
+Para cada hallazgo CLAVE indicá el nivel de su fuente (ej.: «(fuente nivel 1: BCP)»). \
+Si una cifra importante solo aparece en fuentes de nivel bajo, decilo explícitamente. \
+Cuando la primera búsqueda devuelva fuentes débiles, REFORMULÁ la consulta apuntando \
+a instituciones (ej. agregando «site oficial», «informe anual», «estadísticas oficiales», \
+nombre del regulador) y volvé a llamar a `investigar_web`.
 4. Gráficos: cuando una visualización sustente el análisis, usá `generar_grafico` \
 con los datos que ya verificaste, e insertá en tu respuesta el bloque markdown \
 EXACTO que devuelve la tool, en el lugar del texto donde corresponde.
@@ -210,6 +226,15 @@ def build_researcher_agent(project_name: str, rigor: str = "estandar"):
             "`investigar_web` con modo=\"academico\", reportá metodología y nivel de "
             "evidencia de cada estudio, y distinguí evidencia académica de fuentes "
             "de industria."
+        )
+    else:
+        instructions += (
+            "\nRIGOR ESTÁNDAR = rigor de consultora internacional: la jerarquía de "
+            "fuentes es INNEGOCIABLE (priorizá niveles 1-4 y reformulá búsquedas hasta "
+            "conseguirlos), triangulá toda cifra clave con al menos dos fuentes "
+            "independientes cuando sea posible, e indicá el nivel de cada fuente. "
+            "Podés usar modo=\"academico\" puntualmente si un punto exige evidencia "
+            "científica."
         )
     instructions += f"\nProyecto activo: «{project_name}»."
 
