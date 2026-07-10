@@ -12,6 +12,33 @@ export default function ProjectOverview() {
   const [versions, setVersions] = useState<any[]>([]);
   const [doc, setDoc] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState("");
+
+  const exportDoc = async (format: "docx" | "pdf") => {
+    setExporting(format);
+    try {
+      const job = await apiFetch<any>(`/api/v1/projects/${params.id}/exports`, {
+        method: "POST",
+        body: JSON.stringify({ format }),
+      });
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const st = await apiFetch<any>(`/api/v1/projects/${params.id}/exports/${job.id}`);
+        if (st.status === "done") {
+          window.location.href = `/api/v1/projects/${params.id}/exports/${job.id}/download`;
+          break;
+        }
+        if (st.status === "failed") {
+          alert(st.last_error || "La exportación falló");
+          break;
+        }
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setExporting("");
+    }
+  };
 
   useEffect(() => {
     apiFetch<any[]>(`/api/v1/projects/${params.id}/versions`).then(setVersions).catch(() => {});
@@ -91,6 +118,19 @@ export default function ProjectOverview() {
             </button>
           </div>
         )}
+        <div className="card p-6">
+          <h2 className="label mb-3">Exportar documento</h2>
+          <div className="flex gap-2">
+            <button className="btn-secondary flex-1" disabled={!!exporting}
+              onClick={() => exportDoc("docx")}>
+              {exporting === "docx" ? "Generando…" : "⬇ Word"}
+            </button>
+            <button className="btn-secondary flex-1" disabled={!!exporting}
+              onClick={() => exportDoc("pdf")}>
+              {exporting === "pdf" ? "Generando…" : "⬇ PDF"}
+            </button>
+          </div>
+        </div>
         <div className="card p-6">
           <h2 className="label mb-3">Accesos rápidos</h2>
           <div className="flex flex-col gap-2">
