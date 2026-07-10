@@ -35,6 +35,7 @@ export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState("nota");
+  const [highlight, setHighlight] = useState<string | null>(null);
   const canWrite = project?.my_permission === "write" || project?.my_permission === "admin";
 
   const load = useCallback(() => {
@@ -42,6 +43,21 @@ export default function NotesPage() {
   }, [params.id]);
 
   useEffect(load, [load]);
+
+  // ?note=... (desde una notificación): resaltar y llevar a esa nota
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("note");
+    if (wanted) setHighlight(wanted);
+  }, []);
+
+  useEffect(() => {
+    if (!highlight || !notes.some((n) => n.id === highlight)) return;
+    document
+      .getElementById(`note-${highlight}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => setHighlight(null), 6000);
+    return () => clearTimeout(timer);
+  }, [highlight, notes]);
 
   const create = async () => {
     if (!title.trim()) return;
@@ -99,7 +115,13 @@ export default function NotesPage() {
             {notes
               .filter((n) => n.status === col.status)
               .map((n) => (
-                <div key={n.id} className="card p-3 animate-pop">
+                <div
+                  key={n.id}
+                  id={`note-${n.id}`}
+                  className={`card p-3 animate-pop ${
+                    highlight === n.id ? "ring-2 ring-brand-primary shadow-elevated" : ""
+                  }`}
+                >
                   <div className="flex items-start gap-1.5">
                     <span>{KIND_EMOJI[n.kind] ?? "📝"}</span>
                     <div className="flex-1 min-w-0">

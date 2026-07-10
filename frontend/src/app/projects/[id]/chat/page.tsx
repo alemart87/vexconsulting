@@ -63,9 +63,16 @@ export default function ChatPage() {
   }, [params.id]);
 
   useEffect(() => {
+    // ?channel=... (desde una notificación): abrir ese canal directamente
+    const wanted =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("channel")
+        : null;
     loadChannels()
       .then((list) => {
-        if (list.length && !activeRef.current) setActive(list[0]);
+        if (!list.length || activeRef.current) return;
+        const target = wanted ? list.find((c) => c.id === wanted) : null;
+        setActive(target ?? list[0]);
       })
       .catch(() => {});
     apiFetch<Mentionable>(`/api/v1/projects/${params.id}/chat/mentionables`)

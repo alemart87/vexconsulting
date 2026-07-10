@@ -71,11 +71,12 @@ async def create_note(
         created_by_name=access.user.full_name,
     )
     db.add(note)
+    await db.flush()  # asigna note.id ANTES de armar el link de la notificación
 
     # Notificaciones: el asignado recibe aviso propio; el resto del equipo, uno general.
     kind_label = {"nota": "Nota", "hipotesis": "Hipótesis", "hallazgo": "Hallazgo", "tarea": "Tarea"}
     label = kind_label.get(note.kind, "Nota")
-    link = f"/projects/{project_id}/notes"
+    link = f"/projects/{project_id}/notes?note={note.id}"
     members = await project_member_ids(db, access.project)
     assigned = {payload.assigned_to} if payload.assigned_to else set()
     if assigned - {access.user.id}:

@@ -215,7 +215,7 @@ async def send_message(
     # --- Notificaciones (campana): menciones > directo > tema ---
     author = access.user
     preview = f"{author.full_name}: {message.content[:120]}"
-    link = f"/projects/{project_id}/chat"
+    link = f"/projects/{project_id}/chat?channel={channel_id}"
     raw_mentions = (payload.mentions or {}).get("users") or []
     mentioned = {
         (m.get("id") if isinstance(m, dict) else m) for m in raw_mentions

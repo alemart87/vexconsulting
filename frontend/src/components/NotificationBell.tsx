@@ -65,7 +65,12 @@ export default function NotificationBell() {
     setUnread((u) => Math.max(0, u - 1));
     setOpen(false);
     apiFetch(`/api/v1/notifications/${n.id}/read`, { method: "POST" }).catch(() => {});
-    if (n.link) router.push(n.link);
+    if (!n.link) return;
+    // Ya en la misma página (ej. otro canal del mismo chat): recarga completa
+    // para que se abra el canal/nota exactos del query string.
+    const [path] = n.link.split("?");
+    if (window.location.pathname === path) window.location.href = n.link;
+    else router.push(n.link);
   };
 
   const readAll = () => {
