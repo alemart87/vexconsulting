@@ -97,8 +97,9 @@ export default function DocumentPage() {
   }
   const [convId, setConvId] = useState<string | null>(null);
   const [thread, setThread] = useState<ResearchTurn[]>([]);
-  const [lastEngine, setLastEngine] = useState<"perplexity" | "openai">("perplexity");
+  const [engine, setEngine] = useState<"perplexity" | "openai">("perplexity");
   const [reader, setReader] = useState<ResearchTurn | null>(null); // modo lectura amplio
+  const [panelError, setPanelError] = useState("");
   const threadEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -226,19 +227,16 @@ export default function DocumentPage() {
     }
   };
 
-  const requestResearch = async (
-    engine: "openai" | "perplexity",
-    queryOverride?: string
-  ) => {
-    const query = (queryOverride ?? aiQuery).trim();
-    if (!query) return;
+  const requestResearch = async () => {
+    const query = aiQuery.trim();
+    if (!query || aiLoading) return;
     const info = editorRef.current?.getContextInfo();
     setAiLoading(true);
-    setLastEngine(engine);
+    setPanelError("");
     setAiLoadingLabel(
       engine === "perplexity"
-        ? "VEX Consulting IA investigando…"
-        : "IA tradicional investigando en la web… hasta 1 minuto"
+        ? "VEX Consulting IA investigando… (hasta 1 minuto)"
+        : "IA tradicional investigando… (hasta 1 minuto)"
     );
     setThread((t) => [...t, { role: "user", content: query }]);
     setAiQuery("");
@@ -263,23 +261,25 @@ export default function DocumentPage() {
       setReader(turn); // abrir en modo lectura amplio automáticamente
     } catch (e: any) {
       setThread((t) => t.slice(0, -1));
-      setStatus(`Investigación: ${e.message}`);
+      setAiQuery(query); // devolver el texto para reintentar
+      setPanelError(e.message || "No se pudo completar la investigación");
     } finally {
       setAiLoading(false);
     }
   };
 
-  const deepen = () =>
-    requestResearch(
-      lastEngine,
-      "Profundizá la investigación anterior: desagregá por país y por año, agregá series " +
-        "temporales si existen, verificá las cifras con fuentes adicionales e indicá " +
-        "discrepancias entre fuentes."
-    );
-
   const newThread = () => {
     setConvId(null);
     setThread([]);
+    setPanelError("");
+  };
+
+  /** Separa el cuerpo de la lista de fuentes (la lista solo se muestra en modo lectura). */
+  const splitSources = (md: string) => {
+    const idx = md.indexOf("**Fuentes consultadas:**");
+    if (idx === -1) return md;
+    const body = md.slice(0, idx).trim();
+    return body || md;
   };
 
   if (!doc) return <div className="card p-10 text-center text-brand-slate">Cargando…</div>;
@@ -378,67 +378,20 @@ export default function DocumentPage() {
 
             {panelTab === "investigador" ? (
               <div className="p-3 space-y-2.5">
-                {editable && (
-                  <div className="flex gap-1 flex-wrap items-center">
-                    {AI_ACTIONS.map((a) => (
-                      <button
-                        key={a.label}
-                        className="btn-secondary !px-2.5 !py-1 text-[11px]"
-                        disabled={aiLoading}
-                        onClick={() => requestSuggestion(a.instruction)}
-                        title="Actúa sobre la selección o el texto anterior al cursor"
-                      >
-                        {a.label}
-                      </button>
-                    ))}
-                    {thread.length > 0 && (
-                      <button
-                        className="btn-ghost !px-2 !py-1 text-[11px] ml-auto"
-                        onClick={newThread}
-                        title="Empezar un hilo de investigación nuevo (el actual queda guardado)"
-                      >
-                        🆕 Nuevo hilo
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {aiSuggestion && !aiLoading && (
-                  <div className="animate-pop space-y-1.5 rounded-md border border-brand-cyan/40 p-2">
-                    <pre className="text-xs whitespace-pre-wrap bg-brand-bg-soft rounded p-2 max-h-48 overflow-y-auto font-sans">
-                      {aiSuggestion}
-                    </pre>
-                    <div className="flex gap-1.5">
-                      <button
-                        className="btn-primary !py-1 text-[11px] flex-1"
-                        onClick={() => {
-                          insertText(aiSuggestion);
-                          setAiSuggestion("");
-                        }}
-                      >
-                        ⤵ Insertar en el cursor
-                      </button>
-                      <button className="btn-ghost text-[11px]" onClick={() => setAiSuggestion("")}>
-                        Descartar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
                 {/* Hilo de investigación con memoria */}
-                <div className="max-h-[56vh] overflow-y-auto space-y-2.5 pr-1">
+                <div className="max-h-[58vh] overflow-y-auto space-y-2.5 pr-1">
                   {thread.length === 0 && !aiLoading && (
-                    <p className="text-[11px] text-brand-slate leading-relaxed py-2">
-                      Este es tu lienzo de investigación: el investigador experto recuerda el
-                      hilo completo (últimos 30 mensajes) — podés pedir más profundidad hasta
-                      llegar al resultado que buscás, y cada hallazgo se inserta en el
-                      documento con sus fuentes.
+                    <p className="text-xs text-brand-slate leading-relaxed py-2">
+                      Escribí abajo qué investigar. El investigador recuerda todo el hilo:
+                      para continuar o profundizar, simplemente seguí escribiendo — como en
+                      un chat. Cada resultado se abre en modo lectura y se puede insertar en
+                      el documento con sus fuentes.
                     </p>
                   )}
                   {thread.map((t, i) =>
                     t.role === "user" ? (
                       <div key={i} className="flex justify-end">
-                        <div className="max-w-[90%] rounded-lg bg-brand-primary text-white px-3 py-1.5 text-xs">
+                        <div className="max-w-[90%] rounded-lg bg-brand-primary text-white px-3 py-1.5 text-[13px]">
                           {t.content}
                         </div>
                       </div>
@@ -453,91 +406,132 @@ export default function DocumentPage() {
                               {t.citations.length} fuentes
                             </span>
                           )}
+                        </div>
+                        <div className="prose-vex !text-[13.5px] !leading-relaxed max-h-80 overflow-y-auto pr-1.5 [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {splitSources(t.content)}
+                          </ReactMarkdown>
+                        </div>
+                        <div className="flex gap-1.5 mt-2">
                           <button
-                            className="ml-auto text-[11px] font-semibold text-brand-cyan hover:underline"
+                            className="btn-secondary !py-1 text-xs flex-1"
                             onClick={() => setReader(t)}
-                            title="Abrir en modo lectura amplio"
                           >
-                            ⛶ Ampliar
+                            📖 Leer completo y fuentes
                           </button>
-                        </div>
-                        <div className="prose-vex !text-sm max-h-96 overflow-y-auto pr-1.5 [&_h1]:!text-base [&_h2]:!text-base [&_h3]:!text-sm">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{t.content}</ReactMarkdown>
-                        </div>
-                        {editable && (
-                          <div className="flex gap-1.5 mt-2">
+                          {editable && (
                             <button
-                              className="btn-secondary !py-1 text-[11px] flex-1"
-                              onClick={() => setReader(t)}
-                            >
-                              📖 Leer completo
-                            </button>
-                            <button
-                              className="btn-primary !py-1 text-[11px] flex-1"
+                              className="btn-primary !py-1 text-xs flex-1"
                               onClick={() => insertText(t.content)}
                             >
                               ⤵ Insertar
                             </button>
-                            {i === thread.length - 1 && (
-                              <button
-                                className="btn-secondary !py-1 text-[11px]"
-                                disabled={aiLoading}
-                                onClick={deepen}
-                              >
-                                🔎 Profundizar
-                              </button>
-                            )}
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                     )
                   )}
                   {aiLoading && (
-                    <div className="shimmer-text text-xs font-semibold py-1">{aiLoadingLabel}</div>
+                    <div className="shimmer-text text-sm font-semibold py-1.5">{aiLoadingLabel}</div>
+                  )}
+                  {panelError && (
+                    <div className="rounded-md bg-brand-primary-light text-brand-primary-dark text-xs px-3 py-2 animate-pop">
+                      {panelError} — tu consulta quedó en el campo, reintentá.
+                    </div>
                   )}
                   <div ref={threadEndRef} />
                 </div>
 
                 {editable && (
                   <>
-                    <textarea
-                      className="input !py-2 text-xs resize-none"
-                      rows={2}
-                      placeholder={
-                        thread.length
-                          ? "Seguí la investigación: pedí más detalle, otro corte, verificación…"
-                          : "¿Qué investigamos? Ej.: «tarifas BPO nearshore LatAm 2026 con fuentes»"
-                      }
-                      value={aiQuery}
-                      onChange={(e) => setAiQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey && aiQuery.trim()) {
-                          e.preventDefault();
-                          requestResearch(capabilities.perplexity ? "perplexity" : "openai");
+                    <div className="flex gap-1.5 items-end">
+                      <textarea
+                        className="input !py-2 text-[13px] resize-none flex-1"
+                        rows={2}
+                        placeholder={
+                          thread.length
+                            ? "Continuá el hilo: «profundizá en Paraguay», «desagregá por año», «verificá esa cifra»…"
+                            : "¿Qué investigamos? Ej.: «migración de voz a canales digitales en BPO, últimos 10 años»"
                         }
-                      }}
-                      disabled={aiLoading}
-                    />
-                    <div className="flex gap-1.5">
-                      {capabilities.perplexity && (
-                        <button
-                          className="btn-primary !py-1.5 text-xs flex-1"
-                          disabled={aiLoading || !aiQuery.trim()}
-                          onClick={() => requestResearch("perplexity")}
-                          title="Motor principal de investigación de VEX Consulting"
-                        >
-                          🔬 VEX Consulting IA
-                        </button>
-                      )}
+                        value={aiQuery}
+                        onChange={(e) => setAiQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            requestResearch();
+                          }
+                        }}
+                        disabled={aiLoading}
+                      />
                       <button
-                        className={`${capabilities.perplexity ? "btn-secondary" : "btn-primary"} !py-1.5 text-xs flex-1`}
+                        className="btn-primary !py-2.5"
                         disabled={aiLoading || !aiQuery.trim()}
-                        onClick={() => requestResearch("openai")}
-                        title="Motor alternativo (OpenAI con búsqueda web)"
+                        onClick={requestResearch}
                       >
-                        IA tradicional
+                        {aiLoading ? "…" : "Investigar"}
                       </button>
                     </div>
+                    <div className="flex items-center justify-between text-[11px] text-brand-slate">
+                      <label className="flex items-center gap-1.5">
+                        Motor:
+                        <select
+                          className="bg-transparent font-semibold text-brand-ink focus:outline-none cursor-pointer"
+                          value={engine}
+                          onChange={(e) => setEngine(e.target.value as any)}
+                        >
+                          {capabilities.perplexity && (
+                            <option value="perplexity">VEX Consulting IA</option>
+                          )}
+                          <option value="openai">IA tradicional</option>
+                        </select>
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <details className="relative">
+                          <summary className="cursor-pointer hover:text-brand-ink list-none">
+                            ✍ Ayuda de redacción
+                          </summary>
+                          <div className="absolute bottom-6 right-0 card shadow-elevated p-2 flex flex-col gap-1 w-52 z-20 animate-pop">
+                            {AI_ACTIONS.map((a) => (
+                              <button
+                                key={a.label}
+                                className="btn-ghost !justify-start !px-2 !py-1.5 text-xs"
+                                disabled={aiLoading}
+                                onClick={() => requestSuggestion(a.instruction)}
+                              >
+                                {a.label}
+                              </button>
+                            ))}
+                          </div>
+                        </details>
+                        {thread.length > 0 && (
+                          <button className="hover:text-brand-ink" onClick={newThread}>
+                            🆕 Nuevo hilo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {aiSuggestion && !aiLoading && (
+                      <div className="animate-pop space-y-1.5 rounded-md border border-brand-cyan/40 p-2">
+                        <div className="prose-vex !text-[13px] max-h-48 overflow-y-auto p-1">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{aiSuggestion}</ReactMarkdown>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <button
+                            className="btn-primary !py-1 text-xs flex-1"
+                            onClick={() => {
+                              insertText(aiSuggestion);
+                              setAiSuggestion("");
+                            }}
+                          >
+                            ⤵ Insertar en el cursor
+                          </button>
+                          <button className="btn-ghost text-xs" onClick={() => setAiSuggestion("")}>
+                            Descartar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -573,27 +567,15 @@ export default function DocumentPage() {
                   )}
                   <div className="ml-auto flex gap-2">
                     {editable && (
-                      <>
-                        <button
-                          className="btn-primary !py-1.5 text-xs"
-                          onClick={() => {
-                            insertText(reader.content);
-                            setReader(null);
-                          }}
-                        >
-                          ⤵ Insertar en el documento
-                        </button>
-                        <button
-                          className="btn-secondary !py-1.5 text-xs"
-                          disabled={aiLoading}
-                          onClick={() => {
-                            setReader(null);
-                            deepen();
-                          }}
-                        >
-                          🔎 Profundizar
-                        </button>
-                      </>
+                      <button
+                        className="btn-primary !py-1.5 text-xs"
+                        onClick={() => {
+                          insertText(reader.content);
+                          setReader(null);
+                        }}
+                      >
+                        ⤵ Insertar en el documento
+                      </button>
                     )}
                     <button className="btn-ghost !py-1.5 text-xs" onClick={() => setReader(null)}>
                       ✕ Cerrar
