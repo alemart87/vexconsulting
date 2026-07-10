@@ -19,3 +19,6 @@ smoke_test.db
 # SO / editor
 .DS_Store
 Thumbs.db
+uploads_test/
+backend/uploads_test/
+backend/smoke_test*.db
