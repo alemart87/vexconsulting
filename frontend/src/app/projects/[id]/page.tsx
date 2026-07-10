@@ -6,6 +6,29 @@ import { useParams } from "next/navigation";
 import { apiFetch, downloadFile, formatDate } from "@/lib/api";
 import { useProject } from "@/components/ProjectContext";
 
+/** Citas del documento: entradas de la sección Referencias si existe;
+ *  si no, enlaces externos únicos usados como cita en el texto. */
+function countCitations(md: string): number {
+  const parts = md.split(/^##\s+Referencias\s*$/im);
+  if (parts.length > 1) {
+    const entries = parts[parts.length - 1]
+      .split(/\n\s*\n/)
+      .map((s) => s.trim())
+      .filter((s) => s && !s.startsWith("#"));
+    if (entries.length) return entries.length;
+  }
+  const links = md.match(/\[[^\]]+\]\(https?:\/\/[^\s)]+\)/g) ?? [];
+  const urls = links
+    .map((l) => l.match(/\((https?:[^\s)]+)\)/)?.[1])
+    .filter(Boolean);
+  return new Set(urls).size;
+}
+
+/** Páginas A4 estimadas con la maqueta del export (~450 palabras por página). */
+function estimatePages(words: number): number {
+  return words > 0 ? Math.max(1, Math.ceil(words / 450)) : 0;
+}
+
 export default function ProjectOverview() {
   const params = useParams<{ id: string }>();
   const { project, reload } = useProject();
@@ -69,12 +92,30 @@ export default function ProjectOverview() {
       <div className="lg:col-span-2 space-y-4">
         <div className="card p-6">
           <h2 className="label mb-3">Documento maestro</h2>
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <div className="font-display text-4xl text-brand-ink">
-                {(doc?.word_count ?? 0).toLocaleString("es-PY")}
+          <div className="flex items-end justify-between gap-4 flex-wrap">
+            <div className="flex gap-8 flex-wrap">
+              <div>
+                <div className="font-display text-4xl text-brand-ink">
+                  {(doc?.word_count ?? 0).toLocaleString("es-PY")}
+                </div>
+                <div className="text-xs text-brand-slate">palabras</div>
               </div>
-              <div className="text-xs text-brand-slate">palabras · {versions.length} versiones</div>
+              <div>
+                <div className="font-display text-4xl text-brand-ink">
+                  {estimatePages(doc?.word_count ?? 0)}
+                </div>
+                <div className="text-xs text-brand-slate">páginas aprox. (A4)</div>
+              </div>
+              <div>
+                <div className="font-display text-4xl text-brand-ink">
+                  {countCitations(doc?.content_md ?? "")}
+                </div>
+                <div className="text-xs text-brand-slate">citas / referencias</div>
+              </div>
+              <div>
+                <div className="font-display text-4xl text-brand-ink">{versions.length}</div>
+                <div className="text-xs text-brand-slate">versiones</div>
+              </div>
             </div>
             <Link href={`/projects/${params.id}/document`} className="btn-primary">
               Abrir editor
