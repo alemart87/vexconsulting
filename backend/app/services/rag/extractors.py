@@ -14,7 +14,8 @@ _MIN_CHARS_PER_PAGE = 100  # bajo esto, el PDF probablemente es escaneado
 
 
 def extract_pdf(path: str) -> tuple[list[Section], int]:
-    """pypdf primero; si el texto es pobre, reintenta con pdfplumber."""
+    """Cascada: pypdf → pdfplumber → PyMuPDF → OCR con visión de GPT
+    (para PDFs escaneados, si hay OPENAI_API_KEY y OCR habilitado)."""
     from pypdf import PdfReader
 
     reader = PdfReader(path)
@@ -27,19 +28,106 @@ def extract_pdf(path: str) -> tuple[list[Section], int]:
             pages.append({"text": text, "meta": {"page": i}})
 
     n_pages = len(reader.pages)
-    if n_pages and total_chars / max(n_pages, 1) < _MIN_CHARS_PER_PAGE:
+
+    def _is_poor() -> bool:
+        chars = sum(len(p["text"]) for p in pages)
+        return not n_pages or chars / max(n_pages, 1) < _MIN_CHARS_PER_PAGE
+
+    if _is_poor():
         try:
             import pdfplumber
 
-            pages = []
+            alt: list[Section] = []
             with pdfplumber.open(path) as pdf:
                 for i, page in enumerate(pdf.pages, start=1):
                     text = (page.extract_text() or "").strip()
                     if text:
-                        pages.append({"text": text, "meta": {"page": i}})
+                        alt.append({"text": text, "meta": {"page": i}})
+            if sum(len(p["text"]) for p in alt) > sum(len(p["text"]) for p in pages):
+                pages = alt
         except Exception:
-            pass  # nos quedamos con lo de pypdf
+            pass
+
+    if _is_poor():
+        try:
+            alt = _pymupdf_text(path)
+            if sum(len(p["text"]) for p in alt) > sum(len(p["text"]) for p in pages):
+                pages = alt
+        except Exception:
+            pass
+
+    if _is_poor():
+        # PDF escaneado: OCR con visión de GPT (página → imagen → transcripción)
+        from ...core.config import settings
+
+        if settings.ocr_enabled and settings.openai_api_key:
+            ocr_pages = _vision_ocr(path, max_pages=30)
+            if ocr_pages:
+                pages = ocr_pages
+
     return pages, n_pages
+
+
+def _pymupdf_text(path: str) -> list[Section]:
+    import fitz  # PyMuPDF
+
+    doc = fitz.open(path)
+    pages: list[Section] = []
+    for i, page in enumerate(doc, start=1):
+        text = (page.get_text() or "").strip()
+        if text:
+            pages.append({"text": text, "meta": {"page": i}})
+    doc.close()
+    return pages
+
+
+def _vision_ocr(path: str, max_pages: int = 30) -> list[Section]:
+    """Transcribe páginas escaneadas con el modelo de visión de OpenAI.
+    Corre en el subproceso de ingesta (cliente síncrono)."""
+    import base64
+
+    import fitz  # PyMuPDF
+    from openai import OpenAI
+
+    from ...core.config import settings
+
+    client = OpenAI(api_key=settings.openai_api_key, timeout=180)
+    doc = fitz.open(path)
+    pages: list[Section] = []
+    for i, page in enumerate(doc, start=1):
+        if i > max_pages:
+            break
+        pix = page.get_pixmap(dpi=150)
+        b64 = base64.b64encode(pix.tobytes("png")).decode()
+        try:
+            resp = client.chat.completions.create(
+                model=settings.agent_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Transcribí TODO el texto visible de esta página "
+                                "escaneada, en orden de lectura y en su idioma original. "
+                                "Las tablas como tablas Markdown. Respondé SOLO con el texto; "
+                                "si la página no tiene texto, respondé VACIO.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{b64}"},
+                            },
+                        ],
+                    }
+                ],
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            if text and text.upper() != "VACIO":
+                pages.append({"text": text, "meta": {"page": i, "ocr": True}})
+        except Exception:
+            continue  # una página fallida no aborta el documento
+    doc.close()
+    return pages
 
 
 def extract_docx(path: str) -> list[Section]:

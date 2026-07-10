@@ -83,8 +83,10 @@ class Settings(BaseSettings):
     perplexity_model: str = "perplexity/sonar"
     perplexity_agent_url: str = "https://api.perplexity.ai/v1/agent"
 
-    # OCR opcional para PDFs escaneados
-    ocr_enabled: bool = False
+    # OCR para PDFs escaneados: usa la visión de OpenAI (sin dependencias
+    # externas). Activo por defecto cuando hay OPENAI_API_KEY.
+    ocr_enabled: bool = True
+    ocr_max_pages: int = 30
 
     @property
     def agent_enabled(self) -> bool:

@@ -106,7 +106,10 @@ async def _process(source_id: str, pool: ProcessPoolExecutor) -> None:
             ))
         source.status = "ready" if chunks else "failed"
         if not chunks:
-            source.last_error = "El archivo no contiene texto extraíble."
+            source.last_error = (
+                "El archivo no contiene texto extraíble (si es un PDF escaneado, "
+                "verificá que el OCR esté habilitado y reintentá)."
+            )
         source.chunk_count = len(chunks)
         source.extracted_chars = extracted_chars
         source.page_count = extraction.get("page_count")
