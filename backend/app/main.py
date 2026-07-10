@@ -35,6 +35,8 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("projects", "agent_instructions_override", "TEXT"),
     ("projects", "owner_name", "VARCHAR(255)"),
     ("documents", "lock_user_name", "VARCHAR(255)"),
+    ("documents", "final_edit_status", "VARCHAR(20)"),
+    ("documents", "final_edit_detail", "JSON"),
     ("sources", "embedding_cost_usd", "FLOAT"),
     ("conversations", "role_slug", "VARCHAR(50)"),
 ]
@@ -72,18 +74,22 @@ async def _ensure_vector_extension() -> None:
 
 
 async def _ensure_required_columns() -> None:
-    if not _is_postgres():
-        return
+    is_pg = _is_postgres()
     async with engine.begin() as conn:
         for table, column, sql_type in REQUIRED_COLUMNS:
-            result = await conn.execute(
-                text(
-                    "SELECT 1 FROM information_schema.columns "
-                    "WHERE table_name=:t AND column_name=:c"
-                ),
-                {"t": table, "c": column},
-            )
-            if result.first() is None:
+            if is_pg:
+                result = await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name=:t AND column_name=:c"
+                    ),
+                    {"t": table, "c": column},
+                )
+                missing = result.first() is None
+            else:  # SQLite (dev): PRAGMA table_info
+                result = await conn.execute(text(f"PRAGMA table_info({table})"))
+                missing = column not in {row[1] for row in result.fetchall()}
+            if missing:
                 logger.info("Auto-healing: agregando %s.%s", table, column)
                 await conn.execute(
                     text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
@@ -110,11 +116,25 @@ async def run_migrations() -> None:
     await _run_idempotent_migrations()
 
 
+async def _recover_stale_final_edits() -> None:
+    """Ediciones finales que quedaron 'running' tras un reinicio → failed."""
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "UPDATE documents SET final_edit_status='failed', "
+                "final_edit_detail='{\"error\": \"Interrumpido por reinicio del servidor\"}' "
+                "WHERE final_edit_status='running'"
+            ))
+    except Exception as exc:  # pragma: no cover
+        logger.warning("No se pudieron recuperar ediciones finales: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     logger.info("VEX Consulting iniciando (env=%s)", settings.env)
     await run_migrations()
+    await _recover_stale_final_edits()
     settings.upload_path  # crea el directorio
     settings.export_path
 

@@ -18,6 +18,8 @@ interface Doc {
   lock_user_id: string | null;
   lock_user_name: string | null;
   lock_expires_at: string | null;
+  final_edit_status?: "running" | "done" | "failed" | null;
+  final_edit_detail?: any;
   updated_at: string;
 }
 
@@ -82,6 +84,10 @@ export default function DocumentPage() {
   const [conflict, setConflict] = useState(false);
   const [summary, setSummary] = useState("");
   const lockTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ---- Edición final APA (job de fondo previo a publicar) ----
+  const [editorKey, setEditorKey] = useState(0); // remonta el editor al cargar la edición
+  const [finalDismissed, setFinalDismissed] = useState(false);
 
   // ---- Panel de agentes (siempre visible) ----
   const [panelTab, setPanelTab] = useState<"investigador" | "chat">("investigador");
@@ -287,6 +293,57 @@ export default function DocumentPage() {
     [doc, params.id, summary]
   );
 
+  // ---- Edición final APA ----
+  const finalEditing = doc?.final_edit_status === "running";
+
+  const runFinalEdit = async () => {
+    if (!doc || finalEditing) return;
+    setStatus("");
+    setFinalDismissed(false);
+    try {
+      const updated = await apiFetch<Doc>(
+        `/api/v1/projects/${params.id}/document/final-edit`,
+        { method: "POST" }
+      );
+      setDoc(updated);
+    } catch (e: any) {
+      setStatus(`Edición final: ${e.message}`);
+    }
+  };
+
+  // Polling mientras la edición final corre (el trabajo vive en el servidor)
+  useEffect(() => {
+    if (!finalEditing) return;
+    const interval = setInterval(async () => {
+      try {
+        const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
+        if (d.final_edit_status !== "running") {
+          setDoc(d);
+          if (d.final_edit_status === "done" && !dirty) {
+            setEditorKey((k) => k + 1); // carga el contenido editado en el editor
+          }
+        }
+      } catch {
+        /* reintenta en el próximo tick */
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [finalEditing, params.id, dirty]);
+
+  const loadFinalEdition = async () => {
+    const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
+    setDoc(d);
+    setEditorKey((k) => k + 1);
+    setDirty(false);
+  };
+
+  // El aviso de resultado se muestra solo si la edición terminó hace <24 h.
+  const finalDetail = doc?.final_edit_detail;
+  const finalRecent =
+    doc?.final_edit_status === "failed" ||
+    (finalDetail?.finished_at &&
+      Date.now() - new Date(finalDetail.finished_at).getTime() < 24 * 3600 * 1000);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
@@ -392,6 +449,50 @@ export default function DocumentPage() {
           ✏️ <b>{doc.lock_user_name}</b> está editando el documento. Se abrió en modo lectura.
         </div>
       )}
+      {finalEditing && (
+        <div className="rounded-md bg-brand-purple/5 border border-brand-purple/30 px-4 py-2.5 text-sm text-brand-graphite animate-fade">
+          <span className="inline-block animate-pulse">🪄</span>{" "}
+          <b>Edición final APA en curso</b> — se corrige el estilo, se normalizan las
+          citas, se numeran tablas y figuras y se arma la lista de Referencias. El
+          resultado se guarda como versión nueva; podés seguir navegando.
+        </div>
+      )}
+      {!finalEditing && doc.final_edit_status === "done" && finalRecent && !finalDismissed && (
+        <div className="rounded-md bg-emerald-50 border border-emerald-300 px-4 py-3 text-sm animate-pop">
+          ✅ <b>Edición final APA lista</b> — versión {finalDetail?.version_number}:{" "}
+          {finalDetail?.referencias ?? 0} referencias, {finalDetail?.tablas_numeradas ?? 0}{" "}
+          tablas y {finalDetail?.figuras_numeradas ?? 0} figuras numeradas. Revisá el
+          resultado y recién después publicá.
+          <div className="mt-2 flex gap-2 flex-wrap">
+            <button className="btn-primary text-xs px-3 py-1.5" onClick={loadFinalEdition}>
+              Cargar en el editor
+            </button>
+            <Link
+              href={`/projects/${params.id}/document/versions`}
+              className="btn-secondary text-xs px-3 py-1.5"
+            >
+              Ver cambios en el historial
+            </Link>
+            <button
+              className="btn-ghost text-xs px-3 py-1.5"
+              onClick={() => setFinalDismissed(true)}
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+      {!finalEditing && doc.final_edit_status === "failed" && !finalDismissed && (
+        <div className="rounded-md bg-brand-primary-light border border-brand-primary/30 px-4 py-2.5 text-sm animate-fade">
+          ⚠ <b>La edición final falló:</b> {finalDetail?.error || "error desconocido"}.
+          <button
+            className="btn-ghost text-xs px-2 py-1 ml-2"
+            onClick={() => setFinalDismissed(true)}
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
       {conflict && (
         <div className="rounded-md bg-brand-primary-light border border-brand-primary/30 px-4 py-3 text-sm animate-pop">
           <b>Conflicto de versiones:</b> el documento cambió mientras editabas.
@@ -422,6 +523,18 @@ export default function DocumentPage() {
         </div>
         {editable && (
           <div className="flex items-center gap-2">
+            <button
+              className="btn-secondary !py-1.5 text-xs whitespace-nowrap"
+              onClick={runFinalEdit}
+              disabled={finalEditing || dirty}
+              title={
+                dirty
+                  ? "Guardá los cambios antes de lanzar la edición final"
+                  : "Corrige estilo y ortografía, normaliza citas APA 7, numera tablas y figuras y arma las Referencias. Crea una versión nueva revisable."
+              }
+            >
+              {finalEditing ? "🪄 Editando…" : "🪄 Edición final APA"}
+            </button>
             <input
               className="input !w-64 !py-1.5 text-xs"
               placeholder="Resumen del cambio (opcional)"
@@ -444,6 +557,7 @@ export default function DocumentPage() {
       <div className="grid gap-4 xl:grid-cols-5">
         <div className="xl:col-span-3 min-w-0">
           <MarkdownEditor
+            key={`editor-${editorKey}`}
             projectId={params.id}
             initialMarkdown={doc.content_md}
             editable={editable}

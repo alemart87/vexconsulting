@@ -16,6 +16,8 @@ class DocumentOut(BaseModel):
     lock_user_id: Optional[str] = None
     lock_user_name: Optional[str] = None
     lock_expires_at: Optional[datetime] = None
+    final_edit_status: Optional[str] = None
+    final_edit_detail: Optional[dict] = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}

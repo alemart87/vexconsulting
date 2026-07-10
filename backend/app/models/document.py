@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
@@ -27,6 +27,9 @@ class Document(Base):
     lock_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lock_user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     lock_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Edición final APA (job de fondo): None | running | done | failed
+    final_edit_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    final_edit_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

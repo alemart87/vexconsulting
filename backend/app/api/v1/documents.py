@@ -1,15 +1,27 @@
-"""Documento maestro: lectura, guardado con versionado, lock y vista publicada."""
+"""Documento maestro: lectura, guardado con versionado, lock, vista publicada
+y edición final APA (job de fondo previo a publicar)."""
 from __future__ import annotations
 
+import asyncio
+import logging
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.database import get_db
+from ...core.database import get_db, session_scope
+from ...models.document import Document
 from ...models.document_version import DocumentVersion
+from ...models.project import Project
+from ...models.source import Source
 from ...schemas.document import DocumentOut, DocumentSave, VersionDetail
 from ...services import document_service
 from ...services.audit_service import log_action
 from ..deps import ProjectAccess, client_ip, require_project_read, require_project_write
+
+logger = logging.getLogger("vexconsulting")
 
 router = APIRouter(prefix="/projects/{project_id}/document", tags=["documents"])
 
@@ -78,6 +90,113 @@ async def unlock_document(
     doc = await document_service.get_or_create_document(db, project_id)
     await document_service.release_lock(db, doc, access.user)
     return {"ok": True}
+
+
+async def _final_edit_job(project_id: str, user_id: str, user_name: str,
+                          user_email: str, user_role: str) -> None:
+    """Job de fondo: edita el documento con normas APA y guarda una versión nueva."""
+    from ...services.agent.final_editor import run_final_edit
+
+    async with session_scope() as db:
+        doc = (await db.execute(
+            select(Document).where(Document.project_id == project_id)
+        )).scalar_one_or_none()
+        project = await db.get(Project, project_id)
+        if not doc or not project:
+            return
+        content = doc.content_md or ""
+        project_name = project.name
+        rows = (await db.execute(
+            select(Source).where(Source.project_id == project_id)
+            .order_by(Source.created_at)
+        )).scalars().all()
+        sources = [
+            {
+                "titulo": s.title,
+                "tipo": s.kind,
+                "url": s.url,
+                "anio_carga": s.created_at.year if s.created_at else None,
+                "meta_de_cita": s.citation_meta,
+            }
+            for s in rows
+        ]
+
+    error: str | None = None
+    final_md, stats, cost = "", {}, 0.0
+    try:
+        final_md, stats, cost = await run_final_edit(
+            content_md=content, project_name=project_name, sources=sources,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Edición final falló en proyecto %s", project_id[:8])
+        error = str(exc)[:400]
+
+    async with session_scope() as db:
+        doc = (await db.execute(
+            select(Document).where(Document.project_id == project_id)
+        )).scalar_one_or_none()
+        if not doc:
+            return
+        if error:
+            doc.final_edit_status = "failed"
+            doc.final_edit_detail = {"error": error}
+            await db.commit()
+            return
+        author = SimpleNamespace(id=user_id, full_name=user_name, is_superadmin=False)
+        try:
+            version = await document_service.save_document(
+                db, doc, author, content_md=final_md, base_version_id=None,
+                summary=f"Edición final APA (IA) · solicitada por {user_name}",
+                force=True,
+            )
+        except HTTPException as exc:
+            doc.final_edit_status = "failed"
+            doc.final_edit_detail = {"error": exc.detail}
+            await db.commit()
+            return
+        doc.final_edit_status = "done"
+        doc.final_edit_detail = {
+            **stats,
+            "version_number": version.version_number,
+            "cost_usd": round(cost, 4),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await log_action(
+            db, user_id=user_id, user_email=user_email, user_role=user_role,
+            action="document.final_edit", project_id=project_id,
+            entity_type="version", entity_id=version.id,
+            detail={"version": version.version_number, "cost_usd": round(cost, 4), **stats},
+        )
+        await db.commit()
+    logger.info("Edición final OK en proyecto %s (v%s, USD %.4f)",
+                project_id[:8], stats.get("version_number", "?"), cost)
+
+
+@router.post("/final-edit", response_model=DocumentOut)
+async def request_final_edit(
+    project_id: str,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentOut:
+    """Lanza la edición final APA en segundo plano (sobrevive a la navegación).
+
+    El resultado se guarda como versión nueva: se revisa con el diff del
+    historial y recién después se publica.
+    """
+    doc = await document_service.get_or_create_document(db, project_id)
+    if doc.final_edit_status == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay una edición final en curso")
+    if not (doc.content_md or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El documento está vacío")
+    doc.final_edit_status = "running"
+    doc.final_edit_detail = {"started_at": datetime.now(timezone.utc).isoformat()}
+    await db.commit()
+    await db.refresh(doc)
+    asyncio.create_task(_final_edit_job(
+        project_id, access.user.id, access.user.full_name,
+        access.user.email, access.user.role,
+    ))
+    return DocumentOut.model_validate(doc)
 
 
 @router.get("/published", response_model=VersionDetail)

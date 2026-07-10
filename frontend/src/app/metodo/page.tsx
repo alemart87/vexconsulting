@@ -19,6 +19,7 @@ const PASOS = [
   { n: "3", titulo: "Triangulación", detalle: "Las cifras clave se contrastan con al menos dos fuentes independientes. Las discrepancias no se ocultan: se reportan con ambas cifras." },
   { n: "4", titulo: "Cita verificable en cada dato", detalle: "Ningún número sin fuente. Las citas web llevan enlace directo; las internas, documento y página. El sistema genera la lista de fuentes automáticamente." },
   { n: "5", titulo: "Síntesis con posición", detalle: "El resultado distingue hecho, estimación y opinión, toma posición en las conclusiones y sustenta con gráficos generados desde los datos verificados." },
+  { n: "6", titulo: "Edición final APA 7", detalle: "Antes de publicar, un pase editorial automático corrige estilo y ortografía, normaliza las citas al formato autor-año, numera tablas y figuras con sus leyendas y construye la lista de Referencias en APA 7.ª edición. El resultado queda como versión revisable, y el documento se exporta paginado con portada e índice." },
 ];
 
 export default function MetodoPage() {
