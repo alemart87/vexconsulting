@@ -12,6 +12,11 @@ const TEMPLATES = [
     desc: "Estructura completa con método científico: problema → hipótesis → fuentes → evidencia → síntesis → conclusiones. Incluye Gantt y notas semilla.",
   },
   {
+    slug: "consultoria_clientes",
+    label: "Consultoría a clientes (BPO)",
+    desc: "Encargo para un cliente: ficha del encargo, relevamiento con preguntas guía por dimensión (operación, canales, personas, calidad, cumplimiento, economía), diagnóstico, benchmarks, modelo económico y recomendaciones accionables. Incluye Gantt y tareas semilla.",
+  },
+  {
     slug: "estudio_mercado_general",
     label: "Estudio de mercado general",
     desc: "La misma estructura metodológica, sin especialización sectorial.",

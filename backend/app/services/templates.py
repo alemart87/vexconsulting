@@ -52,6 +52,119 @@ Conclusiones numeradas, cada una trazable a la evidencia. Recomendaciones accion
 Listar todas las fuentes citadas con enlace verificable.
 """
 
+_CONSULTORIA_CLIENTES_MD = """# {name}
+
+**Estado**: borrador · **Metodología**: consultoría a clientes de BPO · **Cliente**: *(completar)*
+
+## Resumen ejecutivo
+
+*(Redactar al final: el problema del cliente, la solución propuesta y el impacto esperado, en una página.)*
+
+## 1. Ficha del cliente y del encargo
+
+- **Razón social e industria**: *(banco, financiera, cooperativa, aseguradora, retail...)*
+- **Tamaño**: clientes activos, sucursales, dotación propia de atención.
+- **Sponsor del encargo y contactos operativos**: *(nombre, cargo, correo)*
+- **Decisión que esta consultoría debe informar**: *(tercerizar, ampliar, migrar canales, renegociar...)*
+- **Alcance y plazo acordados**: *(servicios cubiertos, fecha de entrega)*
+
+## 2. Relevamiento — preguntas guía
+
+*(Completar en las sesiones de discovery. Registrar la respuesta con fecha y quién la dio; lo no respondido queda como supuesto explícito en la sección 7.)*
+
+### 2.1 Operación y demanda
+
+- ¿Qué volúmenes mensuales maneja por canal (llamadas, WhatsApp, chat, correo, presencial) y cómo se distribuyen por franja horaria y día?
+- ¿Cuál es la estacionalidad (cierres, vencimientos, campañas) y los picos históricos?
+- ¿Qué tipos de gestión concentran el volumen (consultas, reclamos, cobranzas, ventas, back office)?
+- ¿Cuál es el AHT actual por tipo de gestión y canal?
+- ¿Qué horario de atención exige el negocio y qué cobertura tiene hoy?
+
+### 2.2 Canales y tecnología
+
+- ¿Qué plataformas usa hoy (telefonía, CRM, ticketing, IVR, bots) y cuáles son propias vs. del proveedor?
+- ¿Qué canales digitales están activos y qué porcentaje del contacto resuelven de punta a punta?
+- ¿Existen integraciones obligatorias (core bancario, CRM del cliente) y con qué accesos?
+- ¿Hay iniciativas de automatización o IA en curso o planificadas?
+
+### 2.3 Personas y organización
+
+- ¿Qué dotación atiende hoy (propia y tercerizada), con qué perfiles y esquema de supervisión?
+- ¿Cuál es la rotación anual del equipo de atención y sus causas conocidas?
+- ¿Qué formación inicial y continua reciben los agentes? ¿Cuánto dura la curva de aprendizaje?
+- ¿Qué complejidad tienen las consultas que llegan a un agente (vs. las autoresueltas)?
+
+### 2.4 Calidad y métricas
+
+- ¿Qué indicadores rige el servicio (SLA, abandono, FCR, NPS, CSAT) y cuáles son sus valores actuales?
+- ¿Cómo se mide la calidad (monitoreo, speech analytics, encuestas) y con qué frecuencia?
+- ¿Existen penalidades o incentivos por nivel de servicio en los contratos vigentes?
+
+### 2.5 Cumplimiento y seguridad
+
+- ¿Qué normativa aplica a la operación (BCP, SEPRELAD, protección de datos personales, defensa del consumidor)?
+- ¿Se exige grabación y resguardo de interacciones? ¿Por cuánto tiempo?
+- ¿Qué requisitos de seguridad de la información pide el cliente (accesos, VPN, PCI, auditorías)?
+- ¿Los datos pueden salir de las instalaciones del cliente o del país?
+
+### 2.6 Economía del servicio
+
+- ¿Cuál es el costo actual del servicio (por hora, por posición o por contacto) y qué incluye?
+- ¿Qué modelo de facturación prefiere el cliente (hora-agente, transacción, resultado, híbrido)?
+- ¿Qué presupuesto anual maneja para atención y qué expectativa de ahorro o mejora tiene?
+- ¿Quién decide la adjudicación y con qué proceso (licitación, adjudicación directa)?
+
+## 3. Diagnóstico
+
+Hallazgos del relevamiento, cada uno con su evidencia (dato del cliente, observación o benchmark).
+
+| Hallazgo | Impacto en el negocio | Evidencia |
+| --- | --- | --- |
+| *(ej.: 35 % del volumen llega fuera del horario cubierto)* | *(abandono, pérdida de venta)* | *(reporte del cliente, fecha)* |
+
+## 4. Benchmarks y comparables
+
+Comparar la operación del cliente con el mercado: tarifas por servicio y país, AHT por industria, mejores prácticas de canales digitales. *(Usar el investigador con la jerarquía de fuentes: reguladores, consultoras reconocidas, informes de industria.)*
+
+## 5. Solución propuesta
+
+- **Dimensionamiento**: posiciones y dotación por franja, a partir de los volúmenes relevados.
+- **Canales y tecnología**: mezcla propuesta (voz, digital, automatización) y quién aporta cada plataforma.
+- **Modelo operativo**: horarios, supervisión, formación, curva de implementación.
+- **Gobernanza**: comité de servicio, reportes, revisión de indicadores.
+
+## 6. Modelo económico
+
+Opciones de tarifa con sus supuestos (presentar al menos dos):
+
+| Modelo | Tarifa propuesta | Incluye | Riesgo asignado |
+| --- | --- | --- | --- |
+| Por hora-agente | | | |
+| Por transacción | | | |
+
+## 7. Riesgos y supuestos
+
+Todo dato no confirmado por el cliente se registra acá como supuesto, con su plan de validación.
+
+## 8. Recomendaciones
+
+*(Numeradas y accionables: cada una con responsable, horizonte (30/90/180 días) e indicador de éxito. Separar victorias rápidas de cambios estructurales. Toda recomendación debe trazar a un hallazgo de la sección 3.)*
+
+1. ...
+
+## 9. Plan de implementación
+
+Fases con hitos verificables: transición, estabilización, mejora continua.
+
+## 10. Próximos pasos y acuerdos
+
+Compromisos de la reunión de cierre: quién, qué y para cuándo.
+
+## Referencias
+
+Listar todas las fuentes citadas con enlace verificable.
+"""
+
 _BLANK_MD = """# {name}
 
 *(Documento maestro del proyecto.)*
@@ -71,6 +184,26 @@ _TEMPLATES: dict[str, dict] = {
         "notes": [
             ("Definir hipótesis H1", "hipotesis"),
             ("Identificar fuentes oficiales disponibles", "tarea"),
+        ],
+    },
+    "consultoria_clientes": {
+        "label": "Consultoría a clientes (BPO)",
+        "content": _CONSULTORIA_CLIENTES_MD,
+        "gantt": [
+            ("Kick-off y ficha del encargo", "hipotesis", 0, 3),
+            ("Sesiones de relevamiento con el cliente (preguntas guía)", "fuentes", 3, 10),
+            ("Solicitud y carga de datos del cliente", "fuentes", 5, 12),
+            ("Diagnóstico y benchmarks de mercado", "evidencia", 17, 10),
+            ("Diseño de solución y modelo económico", "sintesis", 27, 10),
+            ("Recomendaciones e informe final (edición APA)", "sintesis", 37, 5),
+            ("Presentación al cliente y acuerdos", "evaluacion", 42, 5),
+        ],
+        "notes": [
+            ("Agendar kick-off con el sponsor del cliente", "tarea"),
+            ("Solicitar volúmenes históricos de contactos (12 meses, por canal)", "tarea"),
+            ("Solicitar métricas actuales: AHT, SLA, abandono, FCR, NPS/CSAT", "tarea"),
+            ("Confirmar requisitos normativos aplicables (BCP, SEPRELAD, datos personales)", "tarea"),
+            ("Relevar costo actual del servicio y modelo de facturación preferido", "tarea"),
         ],
     },
     "estudio_mercado_general": {
