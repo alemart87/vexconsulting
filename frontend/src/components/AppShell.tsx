@@ -55,6 +55,7 @@ export default function AppShell({
           <Brand />
           <nav className="hidden md:flex items-center gap-1">
             <NavLink href="/dashboard" label="Proyectos" />
+            <NavLink href="/metodo" label="Método y fuentes" />
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
@@ -85,6 +86,7 @@ export default function AppShell({
         {menuOpen && (
           <nav className="md:hidden border-t border-brand-border px-4 py-2 flex flex-col gap-1 animate-fade">
             <NavLink href="/dashboard" label="Proyectos" />
+            <NavLink href="/metodo" label="Método y fuentes" />
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>

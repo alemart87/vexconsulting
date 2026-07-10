@@ -63,6 +63,9 @@ export default function ViewerPage() {
         <div className="mx-auto max-w-6xl px-4 h-16 flex items-center justify-between gap-3">
           <Brand />
           <div className="flex items-center gap-2">
+            <a href="/metodo" className="btn-ghost !py-1.5 text-xs">
+              Método y fuentes
+            </a>
             <button className="btn-secondary !py-1.5 text-xs" disabled={!!exporting}
               onClick={() => exportDoc("docx")}>
               {exporting === "docx" ? "Generando…" : "⬇ Word"}

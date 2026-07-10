@@ -604,6 +604,39 @@ async def _load_research_history(
     return transcript[-tail_cap:]
 
 
+def _domain_denylist() -> list[str]:
+    """Denylist de dominios de baja relevancia (formato Perplexity: prefijo '-')."""
+    domains = [d.strip() for d in settings.perplexity_domain_denylist.split(",") if d.strip()]
+    return [f"-{d}" for d in domains[:10]]  # la API acepta hasta ~10 entradas
+
+
+def _apply_domain_policy(answer: str, citations: list[dict]) -> tuple[str, list[dict]]:
+    """Post-filtrado de la política de dominios: el Agent API de Perplexity aún
+    no aplica search_domain_filter, así que se filtra acá — se eliminan las
+    citas de dominios excluidos y sus enlaces en el texto (queda el texto plano)."""
+    import re as _re
+    from urllib.parse import urlparse
+
+    deny = {d.strip().lower() for d in settings.perplexity_domain_denylist.split(",") if d.strip()}
+    if not deny:
+        return answer, citations
+
+    def _denied(url: str) -> bool:
+        try:
+            host = (urlparse(url).netloc or "").lower().removeprefix("www.")
+        except Exception:
+            return False
+        return any(host == d or host.endswith("." + d) for d in deny)
+
+    citations = [c for c in citations if not _denied(c.get("url") or "")]
+
+    def _strip_link(match: _re.Match) -> str:
+        return match.group(1) if _denied(match.group(2)) else match.group(0)
+
+    answer = _re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", _strip_link, answer or "")
+    return answer, citations
+
+
 async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float]:
     """Investigación vía el Agent API de Perplexity (POST /v1/agent, multi-proveedor,
     tool web_search nativa). Fallback al /chat/completions clásico si no está
@@ -615,18 +648,19 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float
         model = f"perplexity/{model}"
 
     headers = {"Authorization": f"Bearer {settings.perplexity_api_key}"}
+    body = {
+        "model": model,
+        "input": user_prompt,
+        "instructions": _RESEARCH_SYSTEM,
+        "tools": [{"type": "web_search", "search_domain_filter": _domain_denylist()}],
+        "max_output_tokens": 6000,
+    }
     async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(
-            settings.perplexity_agent_url,
-            headers=headers,
-            json={
-                "model": model,
-                "input": user_prompt,
-                "instructions": _RESEARCH_SYSTEM,
-                "tools": [{"type": "web_search"}],
-                "max_output_tokens": 6000,
-            },
-        )
+        resp = await client.post(settings.perplexity_agent_url, headers=headers, json=body)
+        if resp.status_code == 400:
+            # Si esta cuenta/endpoint no acepta el filtro de dominios, reintentar sin él
+            body["tools"] = [{"type": "web_search"}]
+            resp = await client.post(settings.perplexity_agent_url, headers=headers, json=body)
         if resp.status_code == 401:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, "La API key de Perplexity es inválida")
 
@@ -638,6 +672,7 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float
                 headers=headers,
                 json={
                     "model": legacy_model,
+                    "search_domain_filter": _domain_denylist(),
                     "messages": [
                         {"role": "system", "content": _RESEARCH_SYSTEM},
                         {"role": "user", "content": user_prompt},
@@ -693,6 +728,7 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float
         cost = float(((data.get("usage") or {}).get("cost") or {}).get("total_cost") or 0)
     except Exception:
         pass
+    answer, citations = _apply_domain_policy(answer, citations)
     return answer, citations, cost
 
 

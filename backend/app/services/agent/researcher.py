@@ -78,6 +78,11 @@ async def _perplexity_academic(query: str) -> tuple[str, list[dict], float]:
             json={
                 "model": model,
                 "search_mode": "academic",
+                "search_domain_filter": [
+                    f"-{d.strip()}"
+                    for d in settings.perplexity_domain_denylist.split(",")
+                    if d.strip()
+                ][:10],
                 "messages": [
                     {
                         "role": "system",

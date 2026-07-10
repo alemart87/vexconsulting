@@ -77,6 +77,12 @@ class Settings(BaseSettings):
 
     # Investigación profunda (Perplexity Agent API, multi-proveedor)
     perplexity_api_key: str = ""
+    # Dominios EXCLUIDOS de la búsqueda (baja relevancia para investigación
+    # profesional: video social, redes, foros). Separados por coma.
+    perplexity_domain_denylist: str = (
+        "youtube.com,instagram.com,facebook.com,tiktok.com,x.com,twitter.com,"
+        "reddit.com,pinterest.com,quora.com"
+    )
     # Nota: el Agent API habilita modelos según el nivel de uso de la cuenta;
     # "perplexity/sonar" está disponible desde el nivel inicial, "sonar-pro"
     # requiere nivel superior. También acepta openai/*, anthropic/*, etc.
