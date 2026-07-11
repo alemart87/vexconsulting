@@ -52,6 +52,7 @@ export default function ChatPage() {
   const [newTopic, setNewTopic] = useState("");
   const [showNewDm, setShowNewDm] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const msgScrollRef = useRef<HTMLDivElement>(null);
   const lastAtRef = useRef<string | null>(null);
   const activeRef = useRef<Channel | null>(null);
   activeRef.current = active;
@@ -109,7 +110,9 @@ export default function ChatPage() {
   }, [active, params.id]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scrollear solo el panel de mensajes, no la ventana.
+    const box = msgScrollRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
   }, [messages]);
 
   const send = async () => {
@@ -261,7 +264,7 @@ export default function ChatPage() {
           </span>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div ref={msgScrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m) => (
             <div key={m.id} className={m.user_id === me?.id ? "flex justify-end" : "flex"}>
               <div

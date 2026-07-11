@@ -179,9 +179,13 @@ export default function GanttPage() {
             Sin tareas en el cronograma todavía.
           </p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 overflow-x-auto scrollbar-thin -mx-1 px-1">
+            {/* min-w para que el cronograma conserve su forma; en mobile scrollea */}
             {tasks.map((t) => (
-              <div key={t.id} className="grid grid-cols-[220px_1fr_auto] gap-3 items-center">
+              <div
+                key={t.id}
+                className="grid grid-cols-[140px_1fr_auto] sm:grid-cols-[220px_1fr_auto] gap-3 items-center min-w-[560px]"
+              >
                 <div className="text-xs">
                   <div className="font-semibold text-brand-ink truncate">
                     {t.generated_by_ai ? "🤖 " : ""}{t.title}

@@ -117,6 +117,7 @@ export default function DocumentPage() {
   const [reader, setReader] = useState<ResearchTurn | null>(null); // modo lectura amplio
   const [panelError, setPanelError] = useState("");
   const threadEndRef = useRef<HTMLDivElement>(null);
+  const threadScrollRef = useRef<HTMLDivElement>(null);
 
   // ---- @fuentes: citar fuentes específicas (restringen la base interna) ----
   const [projectSources, setProjectSources] = useState<{ id: string; title: string }[]>([]);
@@ -243,7 +244,11 @@ export default function DocumentPage() {
   }, [params.id, loadConvList, loadThread]);
 
   useEffect(() => {
-    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scrollear SOLO el contenedor del hilo, nunca la ventana: scrollIntoView
+    // arrastra a todos los ancestros con scroll (incluido el body) y provocaba
+    // el salto automático de toda la página en desktop y mobile.
+    const box = threadScrollRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
   }, [thread, aiLoading]);
 
   const canWrite =
@@ -538,9 +543,9 @@ export default function DocumentPage() {
           </Link>
         </div>
         {editable && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
             <button
-              className="btn-editorial !py-1.5 text-xs whitespace-nowrap"
+              className="btn-editorial !py-1.5 text-xs whitespace-nowrap order-1"
               onClick={runFinalEdit}
               disabled={finalEditing || dirty}
               title={
@@ -558,13 +563,13 @@ export default function DocumentPage() {
               )}
             </button>
             <input
-              className="input !w-64 !py-1.5 text-xs"
+              className="input flex-1 min-w-[140px] sm:!w-64 sm:flex-none !py-1.5 text-xs order-3 sm:order-2"
               placeholder="Resumen del cambio (opcional)"
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
             />
             <button
-              className="btn-primary !py-1.5"
+              className="btn-primary !py-1.5 whitespace-nowrap order-2 sm:order-3"
               onClick={() => save()}
               disabled={saving || !dirty}
             >
@@ -647,7 +652,7 @@ export default function DocumentPage() {
                 )}
 
                 {/* Hilo de investigación con memoria */}
-                <div className="max-h-[58vh] overflow-y-auto space-y-2.5 pr-1">
+                <div ref={threadScrollRef} className="max-h-[58vh] overflow-y-auto space-y-2.5 pr-1">
                   {thread.length === 0 && !aiLoading && (
                     <p className="text-xs text-brand-slate leading-relaxed py-2">
                       Escribí abajo qué investigar. El investigador recuerda todo el hilo:
@@ -960,7 +965,7 @@ export default function DocumentPage() {
                 className="card w-full max-w-4xl max-h-[90vh] flex flex-col animate-pop"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center gap-2 px-6 py-3.5 border-b border-brand-border">
+                <div className="flex items-center gap-2 flex-wrap px-4 sm:px-6 py-3 border-b border-brand-border">
                   <span className={engineBadge(reader.engine).cls}>
                     {engineBadge(reader.engine).label}
                   </span>
@@ -978,15 +983,16 @@ export default function DocumentPage() {
                           setReader(null);
                         }}
                       >
-                        ⤵ Insertar en el documento
+                        ⤵ <span className="hidden sm:inline">Insertar en el documento</span>
+                        <span className="sm:hidden">Insertar</span>
                       </button>
                     )}
                     <button className="btn-ghost !py-1.5 text-xs" onClick={() => setReader(null)}>
-                      ✕ Cerrar
+                      ✕ <span className="hidden sm:inline">Cerrar</span>
                     </button>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto px-8 py-6">
+                <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-6">
                   <div className="prose-vex">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{reader.content}</ReactMarkdown>
                   </div>

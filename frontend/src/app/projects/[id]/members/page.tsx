@@ -113,10 +113,10 @@ export default function MembersPage() {
           {isAdmin && <span className="w-16" />}
         </div>
         {members.map((m) => (
-          <div key={m.id} className="px-5 py-3 flex items-center">
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-brand-ink">{m.user_name}</div>
-              <div className="text-xs text-brand-slate">
+          <div key={m.id} className="px-5 py-3 flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-brand-ink truncate">{m.user_name}</div>
+              <div className="text-xs text-brand-slate truncate">
                 {m.user_email} · {ROLE_LABELS[m.user_role ?? ""] ?? m.user_role}
               </div>
             </div>

@@ -74,11 +74,11 @@ export default function AppShell({
             <div className="h-9 w-9 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm">
               {user.full_name?.slice(0, 1).toUpperCase()}
             </div>
-            <button onClick={onLogout} className="btn-ghost text-xs">
+            <button onClick={onLogout} className="hidden md:inline-flex btn-ghost text-xs">
               Salir
             </button>
             <button
-              className="md:hidden btn-ghost"
+              className="md:hidden btn-ghost !px-2 text-xl leading-none"
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Menú"
             >
@@ -87,12 +87,24 @@ export default function AppShell({
           </div>
         </div>
         {menuOpen && (
-          <nav className="md:hidden border-t border-brand-border px-4 py-2 flex flex-col gap-1 animate-fade">
+          <nav className="md:hidden border-t border-brand-border px-4 py-3 flex flex-col gap-1 animate-fade">
+            <div className="pb-2 mb-1 border-b border-brand-border">
+              <div className="text-sm font-semibold text-brand-ink">{user.full_name}</div>
+              <div className="text-[10px] uppercase tracking-wider2 text-brand-slate">
+                {ROLE_LABELS[user.role] ?? user.role}
+              </div>
+            </div>
             <NavLink href="/dashboard" label="Proyectos" />
             <NavLink href="/metodo" label="Método y fuentes" />
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isLider && <NavLink href="/admin/costos" label="Costos IA" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
+            <button
+              onClick={onLogout}
+              className="mt-1 text-left px-3 py-2 text-sm text-brand-primary font-semibold rounded-md hover:bg-brand-primary-light"
+            >
+              Salir
+            </button>
           </nav>
         )}
       </header>

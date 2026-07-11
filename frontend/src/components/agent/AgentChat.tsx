@@ -35,9 +35,12 @@ export default function AgentChat({ projectId, viewerMode, roleSlug, onProposal,
   const [currentTool, setCurrentTool] = useState("");
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scrollear solo el panel del chat, no la ventana.
+    const box = scrollRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
   }, [messages, thinking]);
 
   const ensureConversation = useCallback(async (): Promise<string> => {
@@ -138,7 +141,7 @@ export default function AgentChat({ projectId, viewerMode, roleSlug, onProposal,
 
   return (
     <div className={`card flex flex-col ${heightClass ?? "h-[72vh]"}`}>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
           <div className="text-center text-sm text-brand-slate pt-16">
             {viewerMode

@@ -104,15 +104,15 @@ export default function MetricsPage() {
         <div className="px-5 py-3 label !mb-0 border-b border-brand-border">
           Aporte por consultor (documento maestro)
         </div>
-        <div className="divide-y divide-brand-border">
-          <div className="px-5 py-2 grid grid-cols-5 text-xs font-semibold uppercase tracking-wider2 text-brand-slate">
+        <div className="divide-y divide-brand-border overflow-x-auto scrollbar-thin">
+          <div className="px-5 py-2 grid grid-cols-5 gap-2 min-w-[520px] text-xs font-semibold uppercase tracking-wider2 text-brand-slate">
             <span className="col-span-2">Consultor</span>
             <span>Ediciones</span>
             <span>Palabras + / −</span>
             <span>Última edición</span>
           </div>
           {data.aportes.map((a: any) => (
-            <div key={a.author_id} className="px-5 py-3 grid grid-cols-5 text-sm items-center">
+            <div key={a.author_id} className="px-5 py-3 grid grid-cols-5 gap-2 min-w-[520px] text-sm items-center">
               <span className="col-span-2 font-semibold text-brand-ink">{a.author_name}</span>
               <span>{a.ediciones}</span>
               <span>
