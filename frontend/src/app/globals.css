@@ -36,6 +36,25 @@ body {
   max-width: 100%;
 }
 
+/* Mapa mental (markmap): tipografía de marca y nodos legibles */
+.markmap-host svg {
+  font-family: "Manrope", system-ui, sans-serif !important;
+  font-size: 15px;
+}
+.markmap-host svg .markmap-node > text,
+.markmap-host svg text {
+  font-weight: 600;
+  fill: #2a2f3a;
+}
+.markmap-host svg .markmap-link {
+  stroke-width: 2px;
+}
+.markmap-host svg circle {
+  r: 5;
+  stroke-width: 2px;
+  cursor: pointer;
+}
+
 /* Scrollbar fina para barras horizontales (ej. navegación de pills) */
 .scrollbar-thin {
   scrollbar-width: thin;

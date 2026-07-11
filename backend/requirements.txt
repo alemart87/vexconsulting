@@ -30,3 +30,4 @@ markdown-it-py==3.0.0
 mdit-py-plugins==0.4.2
 pypandoc==1.14
 weasyprint==63.1
+mutagen==1.47.0

@@ -13,6 +13,7 @@ const TABS = [
   { href: "/preview", label: "Vista previa" },
   { href: "/sources", label: "Fuentes" },
   { href: "/notes", label: "Notas" },
+  { href: "/knowhub", label: "KnowHub" },
   { href: "/chat", label: "Chat equipo" },
   { href: "/gantt", label: "Gantt" },
   { href: "/agent", label: "Agente IA" },

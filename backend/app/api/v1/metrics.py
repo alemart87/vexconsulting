@@ -257,6 +257,36 @@ async def ai_costs(
         by_use["Edición final APA"]["usd"] += final_edit_usd
         by_provider["openai"] += final_edit_usd
 
+    # --- KnowHub (audio, mapas mentales, briefings, FAQ) ---
+    from ...models.knowhub import KnowHubItem
+
+    kh_labels = {"audio": "KnowHub · audio", "mindmap": "KnowHub · mapa mental",
+                 "briefing": "KnowHub · briefing", "faq": "KnowHub · FAQ"}
+    kh_total = 0.0
+    kh_rows = await db.execute(
+        select(
+            KnowHubItem.kind, KnowHubItem.created_by, KnowHubItem.project_id,
+            func.count(KnowHubItem.id), func.coalesce(func.sum(KnowHubItem.cost_usd), 0),
+        )
+        .where(KnowHubItem.created_at >= since, KnowHubItem.cost_usd.isnot(None))
+        .group_by(KnowHubItem.kind, KnowHubItem.created_by, KnowHubItem.project_id)
+    )
+    for kind, user_id, project_id, count, usd in kh_rows:
+        usd = float(usd or 0)
+        kh_total += usd
+        uso = kh_labels.get(kind, f"KnowHub · {kind}")
+        by_use.setdefault(uso, {"usd": 0.0, "consultas": 0})
+        by_use[uso]["usd"] += usd
+        by_use[uso]["consultas"] += int(count or 0)
+        uname = users.get(user_id, user_id or "—")
+        by_user.setdefault(uname, {"usd": 0.0, "consultas": 0})
+        by_user[uname]["usd"] += usd
+        by_user[uname]["consultas"] += int(count or 0)
+        if project_id:
+            pname = projects.get(project_id, project_id)
+            by_project[pname] = by_project.get(pname, 0.0) + usd
+    by_provider["openai"] += kh_total
+
     # --- Embeddings (indexación de fuentes) ---
     emb = float((await db.execute(
         select(func.coalesce(func.sum(Source.embedding_cost_usd), 0))
@@ -267,7 +297,7 @@ async def ai_costs(
         by_use.setdefault("Indexación de fuentes (embeddings)", {"usd": 0.0, "consultas": 0})
         by_use["Indexación de fuentes (embeddings)"]["usd"] += emb
 
-    total = messages_total + eval_usd + final_edit_usd + emb
+    total = messages_total + eval_usd + final_edit_usd + emb + kh_total
     r6 = lambda x: round(float(x), 4)  # noqa: E731
     return {
         "days": days,

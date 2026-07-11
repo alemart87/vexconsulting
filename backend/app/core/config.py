@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     agent_price_cached_input_per_mtok: float = 0.25
     agent_price_output_per_mtok: float = 15.00
 
+    # KnowHub (artefactos de comprensión: audio, mapa mental, briefing, FAQ)
+    knowhub_tts_model: str = "gpt-4o-mini-tts"
+    knowhub_tts_price_per_min: float = 0.015  # USD/min de audio estimado
+    knowhub_voice_host: str = "coral"    # conductora del resumen de audio
+    knowhub_voice_analyst: str = "onyx"  # analista
+
     # Embeddings
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
