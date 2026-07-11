@@ -133,7 +133,7 @@ def _resolve_images(html: str, upload_root: str, project_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# DOCX: pandoc (--toc) + post-proceso python-docx (portada y pie paginado)
+# DOCX: pandoc + post-proceso python-docx (portada, índice real y pie paginado)
 # ---------------------------------------------------------------------------
 
 def _docx_simple_field(paragraph, instruction: str, placeholder: str = "1") -> None:
@@ -151,8 +151,57 @@ def _docx_simple_field(paragraph, instruction: str, placeholder: str = "1") -> N
     paragraph._p.append(fld)
 
 
+def _docx_toc_field(paragraph) -> None:
+    """Inserta un campo TOC REAL de Word (números de página correctos).
+
+    Se marca dirty y, junto con updateFields en settings.xml, Word lo
+    recalcula al abrir el documento — a diferencia del índice estático de
+    pandoc, que mostraba «1» en todas las entradas."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    begin.set(qn("w:dirty"), "true")
+    r = paragraph.add_run()
+    r._r.append(begin)
+
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = ' TOC \\o "1-3" \\h \\z \\u '
+    r = paragraph.add_run()
+    r._r.append(instr)
+
+    sep = OxmlElement("w:fldChar")
+    sep.set(qn("w:fldCharType"), "separate")
+    r = paragraph.add_run()
+    r._r.append(sep)
+
+    paragraph.add_run(
+        "El índice se genera al abrir el documento en Word "
+        "(si no aparece: clic derecho → Actualizar campos)."
+    )
+
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    r = paragraph.add_run()
+    r._r.append(end)
+
+
+def _docx_enable_update_fields(document) -> None:
+    """settings.xml: Word actualiza los campos (índice, numeración) al abrir."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    settings = document.settings.element
+    if settings.find(qn("w:updateFields")) is None:
+        upd = OxmlElement("w:updateFields")
+        upd.set(qn("w:val"), "true")
+        settings.append(upd)
+
+
 def _decorate_docx(path: str, title: str, author_note: str) -> None:
-    """Agrega portada y pie «Página X de Y» al DOCX generado por pandoc."""
+    """Agrega portada, índice real (campo TOC) y pie «Página X de Y»."""
     import docx
     from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
     from docx.shared import Cm, Pt, RGBColor
@@ -162,7 +211,7 @@ def _decorate_docx(path: str, title: str, author_note: str) -> None:
     slate = RGBColor(0x5B, 0x62, 0x75)
     red = RGBColor(0xE6, 0x33, 0x2A)
 
-    # Portada: se inserta ANTES del primer párrafo (el índice de pandoc).
+    # Portada + índice: se insertan ANTES del primer párrafo del cuerpo.
     if d.paragraphs:
         first = d.paragraphs[0]
 
@@ -182,6 +231,16 @@ def _decorate_docx(path: str, title: str, author_note: str) -> None:
                10, False, slate, space_before=4)
         brk = first.insert_paragraph_before("")
         brk.add_run().add_break(WD_BREAK.PAGE)
+
+        # Índice real: título (fuera del TOC) + campo TOC + salto de página
+        toc_title = before("Índice", 20, True, ink, space_before=8)
+        toc_title.paragraph_format.space_before = Pt(0)
+        toc_par = first.insert_paragraph_before("")
+        _docx_toc_field(toc_par)
+        brk2 = first.insert_paragraph_before("")
+        brk2.add_run().add_break(WD_BREAK.PAGE)
+
+    _docx_enable_update_fields(d)
 
     # Pie de página con numeración en todas las secciones.
     for section in d.sections:
@@ -203,26 +262,35 @@ def _decorate_docx(path: str, title: str, author_note: str) -> None:
     d.save(path)
 
 
+def _drop_duplicate_title(md: str, title: str) -> str:
+    """Quita el H1 inicial si repite el título del proyecto: la portada ya lo
+    muestra y duplicarlo ensucia el índice y la primera página."""
+    lines = (md or "").lstrip().splitlines()
+    if lines and lines[0].startswith("# "):
+        heading = lines[0][2:].strip().lower()
+        if heading == (title or "").strip().lower():
+            return "\n".join(lines[1:]).lstrip()
+    return md or ""
+
+
 def export_docx(content_md: str, title: str, author_note: str, output_path: str,
                 upload_root: str, project_id: str) -> None:
-    """Markdown → DOCX vía pandoc con índice; portada y paginado se agregan
-    en post-proceso (python-docx)."""
+    """Markdown → DOCX vía pandoc; portada, índice real (campo TOC) y paginado
+    se agregan en post-proceso (python-docx)."""
     import pypandoc
 
+    md = _drop_duplicate_title(content_md, title)
     md = re.sub(
         r"\(/api/v1/projects/([^/)]+)/images/([^)]+)\)",
         lambda m: f"({(Path(upload_root) / m.group(1) / 'images' / m.group(2)).as_posix()})",
-        content_md or "",
+        md,
     )
     pypandoc.convert_text(
         md,
         "docx",
         format="gfm",
         outputfile=output_path,
-        extra_args=[
-            "--standalone", "--toc", "--toc-depth=3",
-            "-M", "toc-title=Índice", "-M", "lang=es",
-        ],
+        extra_args=["--standalone", "-M", "lang=es"],
     )
     try:
         _decorate_docx(output_path, title, author_note)
@@ -238,6 +306,7 @@ def export_pdf(content_md: str, title: str, author_note: str, output_path: str,
     """Markdown → HTML de marca (portada + índice paginado) → PDF vía WeasyPrint."""
     from weasyprint import HTML
 
+    content_md = _drop_duplicate_title(content_md, title)
     html = md_to_html(content_md, title, author_note, upload_root, project_id)
     HTML(string=html, base_url=upload_root).write_pdf(output_path)
 

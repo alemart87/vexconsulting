@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AgentChat, { Proposal } from "@/components/agent/AgentChat";
+import GuidedTour, { TourStep } from "@/components/GuidedTour";
 import MarkdownEditor, { EditorHandle } from "@/components/editor/MarkdownEditor";
 import { apiFetch, formatDate, getUser } from "@/lib/api";
 import { useProject } from "@/components/ProjectContext";
@@ -53,6 +54,66 @@ function engineBadge(engine?: string): { label: string; cls: string } {
   return { label: "IA tradicional", cls: "badge-neutral" };
 }
 
+/* ===== Visitas guiadas ===== */
+const TOUR_INTRO: TourStep[] = [
+  {
+    target: '[data-tour="editor"]',
+    title: "El documento maestro",
+    body: "Acá se escribe el informe. Cada guardado crea una versión con autor y diferencias: nada se pierde y todo se puede comparar o restaurar.",
+  },
+  {
+    target: '[data-tour="panel-ia"]',
+    title: "VEX Consulting IA",
+    body: "Tu investigador experto: consulta las fuentes del proyecto y la web con citas verificables, y recuerda todo el hilo. Cada resultado se inserta en el informe con un clic.",
+  },
+  {
+    target: '[data-tour="composer"]',
+    title: "Pedí lo que necesites",
+    body: "Escribí qué investigar. Usá @ para basar la investigación en una fuente específica, 📎 para adjuntar imagen o audio y 🎙 para dictar una nota de voz.",
+  },
+  {
+    target: '[data-tour="rigor"]',
+    title: "Elegí el nivel de rigor",
+    body: "Estándar = rigor de consultora (jerarquía de fuentes y triangulación). Académico = prioriza papers revisados por pares, con autores y metodología.",
+  },
+  {
+    target: '[data-tour="edicion-final"]',
+    title: "Edición final APA",
+    body: "Cuando el contenido esté cerrado, este botón corrige estilo y ortografía, convierte las citas a APA 7, numera tablas y figuras y arma las Referencias — en una versión nueva que revisás antes de publicar.",
+  },
+  {
+    target: '[data-tour="guardar"]',
+    title: "Guardá tu trabajo",
+    body: "Crea una versión nueva (también con Ctrl+S). El resumen del cambio es opcional pero ayuda al equipo a seguir la historia del informe.",
+  },
+  {
+    title: "Publicar y exportar",
+    body: "Desde la pestaña Resumen publicás la versión aprobada (lo único que ven los visualizadores) y exportás Word o PDF con portada, índice y numeración de páginas. Podés rever esta guía cuando quieras con el botón «? Guía».",
+  },
+];
+
+const TOUR_APA: TourStep[] = [
+  {
+    target: '[data-tour="apa-banner"]',
+    title: "La edición APA terminó",
+    body: "Se creó una versión NUEVA con citas autor-año, tablas y figuras numeradas y la lista de Referencias en APA 7. Tu texto original quedó intacto en el historial.",
+  },
+  {
+    target: '[data-tour="apa-cargar"]',
+    title: "Paso 1 · Cargala en el editor",
+    body: "Este botón trae la versión editada al editor para que la leas completa.",
+  },
+  {
+    target: '[data-tour="apa-historial"]',
+    title: "Paso 2 · Revisá los cambios",
+    body: "El historial compara línea por línea qué corrigió la edición. Si algo no te convence, restaurás la versión anterior o ajustás a mano.",
+  },
+  {
+    title: "Paso 3 · Publicá y exportá",
+    body: "Cuando estés conforme: pestaña Resumen → «Publicar proyecto». El Word y el PDF salen con portada e índice con números de página reales (Word lo actualiza al abrir el archivo).",
+  },
+];
+
 const AI_ACTIONS = [
   { label: "▸ Continuar", instruction: "" },
   {
@@ -88,6 +149,18 @@ export default function DocumentPage() {
   // ---- Edición final APA (job de fondo previo a publicar) ----
   const [editorKey, setEditorKey] = useState(0); // remonta el editor al cargar la edición
   const [finalDismissed, setFinalDismissed] = useState(false);
+
+  // ---- Visita guiada (bienvenida y post-edición APA) ----
+  const [tourSteps, setTourSteps] = useState<TourStep[] | null>(null);
+  const tourDoneKeyRef = useRef<string | null>(null);
+  const startTour = (steps: TourStep[], doneKey?: string) => {
+    tourDoneKeyRef.current = doneKey ?? null;
+    setTourSteps(steps);
+  };
+  const closeTour = () => {
+    if (tourDoneKeyRef.current) localStorage.setItem(tourDoneKeyRef.current, "1");
+    setTourSteps(null);
+  };
 
   // ---- Panel de agentes (siempre visible) ----
   const [panelTab, setPanelTab] = useState<"investigador" | "chat">("investigador");
@@ -337,8 +410,10 @@ export default function DocumentPage() {
         const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
         if (d.final_edit_status !== "running") {
           setDoc(d);
-          if (d.final_edit_status === "done" && !dirty) {
-            setEditorKey((k) => k + 1); // carga el contenido editado en el editor
+          if (d.final_edit_status === "done") {
+            if (!dirty) setEditorKey((k) => k + 1); // carga el contenido editado
+            // Guía de «qué hacer ahora» al terminar la edición APA
+            setTimeout(() => startTour(TOUR_APA), 700);
           }
         }
       } catch {
@@ -347,6 +422,15 @@ export default function DocumentPage() {
     }, 5000);
     return () => clearInterval(interval);
   }, [finalEditing, params.id, dirty]);
+
+  // Visita guiada de bienvenida: la primera vez que se abre el documento
+  useEffect(() => {
+    if (!doc || !editable) return;
+    if (localStorage.getItem("vex_tour_doc_v1")) return;
+    const timer = setTimeout(() => startTour(TOUR_INTRO, "vex_tour_doc_v1"), 900);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, editable]);
 
   const loadFinalEdition = async () => {
     const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
@@ -479,21 +563,35 @@ export default function DocumentPage() {
         </div>
       )}
       {!finalEditing && doc.final_edit_status === "done" && finalRecent && !finalDismissed && (
-        <div className="rounded-md bg-emerald-50 border border-emerald-300 px-4 py-3 text-sm animate-pop">
+        <div
+          data-tour="apa-banner"
+          className="rounded-md bg-emerald-50 border border-emerald-300 px-4 py-3 text-sm animate-pop"
+        >
           ✅ <b>Edición final APA lista</b> — versión {finalDetail?.version_number}:{" "}
           {finalDetail?.referencias ?? 0} referencias, {finalDetail?.tablas_numeradas ?? 0}{" "}
           tablas y {finalDetail?.figuras_numeradas ?? 0} figuras numeradas. Revisá el
           resultado y recién después publicá.
           <div className="mt-2 flex gap-2 flex-wrap">
-            <button className="btn-primary text-xs px-3 py-1.5" onClick={loadFinalEdition}>
+            <button
+              data-tour="apa-cargar"
+              className="btn-primary text-xs px-3 py-1.5"
+              onClick={loadFinalEdition}
+            >
               Cargar en el editor
             </button>
             <Link
+              data-tour="apa-historial"
               href={`/projects/${params.id}/document/versions`}
               className="btn-secondary text-xs px-3 py-1.5"
             >
               Ver cambios en el historial
             </Link>
+            <button
+              className="btn-ghost text-xs px-3 py-1.5"
+              onClick={() => startTour(TOUR_APA)}
+            >
+              ¿Qué hago ahora?
+            </button>
             <button
               className="btn-ghost text-xs px-3 py-1.5"
               onClick={() => setFinalDismissed(true)}
@@ -532,19 +630,30 @@ export default function DocumentPage() {
       )}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="text-xs text-brand-slate">
-          {doc.word_count.toLocaleString("es-PY")} palabras · actualizado{" "}
-          {formatDate(doc.updated_at)} ·{" "}
-          <Link
-            href={`/projects/${params.id}/document/versions`}
-            className="text-brand-cyan underline"
+        <div className="text-xs text-brand-slate flex items-center gap-2 flex-wrap">
+          <span>
+            {doc.word_count.toLocaleString("es-PY")} palabras · actualizado{" "}
+            {formatDate(doc.updated_at)} ·{" "}
+            <Link
+              href={`/projects/${params.id}/document/versions`}
+              data-tour="historial"
+              className="text-brand-cyan underline"
+            >
+              historial de versiones
+            </Link>
+          </span>
+          <button
+            className="rounded-full border border-brand-border px-2 py-0.5 text-[11px] font-semibold text-brand-slate hover:border-brand-primary hover:text-brand-primary transition-colors"
+            onClick={() => startTour(TOUR_INTRO)}
+            title="Recorré las funciones del documento paso a paso"
           >
-            historial de versiones
-          </Link>
+            ? Guía
+          </button>
         </div>
         {editable && (
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
             <button
+              data-tour="edicion-final"
               className="btn-editorial !py-1.5 text-xs whitespace-nowrap order-1"
               onClick={runFinalEdit}
               disabled={finalEditing || dirty}
@@ -569,6 +678,7 @@ export default function DocumentPage() {
               onChange={(e) => setSummary(e.target.value)}
             />
             <button
+              data-tour="guardar"
               className="btn-primary !py-1.5 whitespace-nowrap order-2 sm:order-3"
               onClick={() => save()}
               disabled={saving || !dirty}
@@ -582,7 +692,7 @@ export default function DocumentPage() {
 
       {/* ==== Editor + Panel de agentes (siempre visible) ==== */}
       <div className="grid gap-4 xl:grid-cols-5">
-        <div className="xl:col-span-3 min-w-0">
+        <div className="xl:col-span-3 min-w-0" data-tour="editor">
           <MarkdownEditor
             key={`editor-${editorKey}`}
             projectId={params.id}
@@ -593,7 +703,10 @@ export default function DocumentPage() {
           />
         </div>
 
-        <aside className="xl:col-span-2 xl:sticky xl:top-20 h-fit space-y-3">
+        <aside
+          className="xl:col-span-2 xl:sticky xl:top-20 h-fit space-y-3"
+          data-tour="panel-ia"
+        >
           <div className="card overflow-hidden">
             <div className="flex border-b border-brand-border">
               <button
@@ -785,7 +898,7 @@ export default function DocumentPage() {
                         )}
                       </div>
                     )}
-                    <div className="flex gap-2 items-end">
+                    <div className="flex gap-2 items-end" data-tour="composer">
                       <button
                         className="h-11 w-11 shrink-0 rounded-md border border-brand-border bg-white text-xl leading-none flex items-center justify-center transition-colors hover:border-brand-primary hover:text-brand-primary disabled:opacity-40"
                         title="Adjuntar imagen o audio: se analiza con IA y queda guardado como fuente"
@@ -888,7 +1001,11 @@ export default function DocumentPage() {
                       </button>
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-brand-slate">
-                      <label className="flex items-center gap-1.5" title="Académico: prioriza publicaciones revisadas por pares (papers, estudios) vía Perplexity search_mode=academic">
+                      <label
+                        data-tour="rigor"
+                        className="flex items-center gap-1.5"
+                        title="Académico: prioriza publicaciones revisadas por pares (papers, estudios) vía Perplexity search_mode=academic"
+                      >
                         Rigor:
                         <select
                           className="bg-transparent font-semibold text-brand-ink focus:outline-none cursor-pointer"
@@ -1046,6 +1163,9 @@ export default function DocumentPage() {
           )}
         </aside>
       </div>
+
+      {/* Visita guiada (bienvenida / post-edición APA) */}
+      {tourSteps && <GuidedTour steps={tourSteps} onClose={closeTour} />}
     </div>
   );
 }
