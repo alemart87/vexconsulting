@@ -59,7 +59,7 @@ class Settings(BaseSettings):
 
     # --- Agentes (OpenAI Agents SDK) ---
     openai_api_key: str = ""
-    agent_model: str = "gpt-5.4"
+    agent_model: str = "gpt-5.6-terra"  # 1M ctx, reasoning, $2.50/$0.25/$15 por Mtok
     agent_reasoning_effort: str = "medium"
     agent_reasoning_summary: str = "auto"
     agent_max_history: int = 30
