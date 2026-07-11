@@ -611,9 +611,9 @@ def _domain_denylist() -> list[str]:
 
 
 def _apply_domain_policy(answer: str, citations: list[dict]) -> tuple[str, list[dict]]:
-    """Post-filtrado de la política de dominios: el Agent API de Perplexity aún
-    no aplica search_domain_filter, así que se filtra acá — se eliminan las
-    citas de dominios excluidos y sus enlaces en el texto (queda el texto plano)."""
+    """Post-filtrado de la política de dominios (defensa en profundidad, además
+    del filtro nativo del API): elimina citas de dominios excluidos y sus
+    enlaces en el texto (queda el texto plano)."""
     import re as _re
     from urllib.parse import urlparse
 
@@ -652,7 +652,13 @@ async def _perplexity_research(user_prompt: str) -> tuple[str, list[dict], float
         "model": model,
         "input": user_prompt,
         "instructions": _RESEARCH_SYSTEM,
-        "tools": [{"type": "web_search", "search_domain_filter": _domain_denylist()}],
+        # El filtro va ANIDADO en `filters` (docs/api-reference/agent-post);
+        # puesto directo en la tool el API lo ignora en silencio. fetch_url
+        # permite al agente leer páginas completas (informes institucionales).
+        "tools": [
+            {"type": "web_search", "filters": {"search_domain_filter": _domain_denylist()}},
+            {"type": "fetch_url"},
+        ],
         "max_output_tokens": 6000,
     }
     async with httpx.AsyncClient(timeout=180) as client:
