@@ -5,7 +5,125 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { CurrentUserInfo, ROLE_LABELS, clearSession, getToken, getUser } from "@/lib/api";
 import Brand from "./Brand";
+import GuidedTour, { TourStep } from "./GuidedTour";
 import NotificationBell from "./NotificationBell";
+
+/** Visita guiada GENERAL de la plataforma (elementos del AppShell y dashboard;
+ *  los pasos cuyo elemento no esté en la página actual se saltan solos). */
+const TOUR_APP: TourStep[] = [
+  {
+    title: "Bienvenido a VEX Consulting",
+    body: "La plataforma de investigación de mercado de Voicenter: documento maestro versionado, agentes de IA con fuentes verificables y trabajo en equipo con método científico. Este recorrido dura un minuto.",
+  },
+  {
+    target: '[data-tour="nav-proyectos"]',
+    title: "Proyectos",
+    body: "Tu espacio de trabajo. Cada proyecto tiene su documento maestro, fuentes con IA, KnowHub (audio y mapa mental), chat de equipo, Gantt, evaluación y métricas.",
+  },
+  {
+    target: '[data-tour="nuevo-proyecto"]',
+    title: "Creá un proyecto",
+    body: "Elegí una plantilla metodológica: investigación de mercado BPO, consultoría a clientes (con preguntas guía) o estudio general. Cada una siembra el documento, el Gantt y las tareas iniciales.",
+  },
+  {
+    target: '[data-tour="nav-metodo"]',
+    title: "Método y fuentes",
+    body: "Nuestro modelo investigativo documentado: el circuito de búsqueda de los agentes, la jerarquía de fuentes con sus logos y las compuertas de validación. Visible para todos — ideal para mostrar a clientes.",
+  },
+  {
+    target: '[data-tour="nav-costos"]',
+    title: "Costos IA",
+    body: "Cuánto se gasta en inteligencia artificial: por modelo, por uso (investigador, edición APA, KnowHub…), por usuario y por proyecto. Todo trackeado, sin sorpresas.",
+  },
+  {
+    target: '[data-tour="campana"]',
+    title: "Notificaciones",
+    body: "Mensajes del chat, menciones con @, notas nuevas y artefactos de KnowHub llegan acá — y cada aviso te lleva al lugar exacto. Se marcan leídos al abrirlos.",
+  },
+  {
+    title: "Las secciones del proyecto",
+    body: "Al entrar a un proyecto vas a ver su barra de secciones (Resumen, Documento, KnowHub…). Tocá el botón ? de arriba estando DENTRO de un proyecto y te las recorremos una por una.",
+  },
+];
+
+/** Guía del navbar del proyecto: recorre pestaña por pestaña.
+ *  Se dispara con el botón ? estando dentro de un proyecto (y sola, la
+ *  primera vez que se entra a uno). Los tabs sin permiso se saltan. */
+const TOUR_PROJECT: TourStep[] = [
+  {
+    title: "Las secciones del proyecto",
+    body: "Cada proyecto se trabaja desde esta barra. Te mostramos qué hay en cada sección — 40 segundos.",
+  },
+  {
+    target: '[data-tour="tab-resumen"]',
+    title: "Resumen",
+    body: "El estado del informe de un vistazo: palabras, páginas, citas y versiones. Desde acá se publica el proyecto y se exporta a Word o PDF con portada e índice.",
+  },
+  {
+    target: '[data-tour="tab-document"]',
+    title: "Documento",
+    body: "El corazón del proyecto: el informe maestro versionado, con el investigador IA al lado (citas verificables, @fuentes, adjuntos y voz) y la Edición final APA antes de publicar.",
+  },
+  {
+    target: '[data-tour="tab-preview"]',
+    title: "Vista previa",
+    body: "El documento como lo ve un lector, limpio y listo para imprimir o presentar.",
+  },
+  {
+    target: '[data-tour="tab-sources"]',
+    title: "Fuentes",
+    body: "La base de conocimiento: PDF, Excel, Word, links, imágenes y audios. La IA los indexa y los cita por página u hoja en cada investigación.",
+  },
+  {
+    target: '[data-tour="tab-notes"]',
+    title: "Notas",
+    body: "Hipótesis, hallazgos y tareas en tablero kanban. Se pueden mencionar con @ desde el chat y asignar a miembros (con notificación).",
+  },
+  {
+    target: '[data-tour="tab-knowhub"]',
+    title: "KnowHub",
+    body: "Entendé el proyecto en minutos: resumen de audio estilo podcast, mapa mental interactivo, briefing y FAQ — generados por IA y compartidos con el equipo.",
+  },
+  {
+    target: '[data-tour="tab-chat"]',
+    title: "Chat equipo",
+    body: "Temas y mensajes directos del proyecto, con menciones @ a miembros y notas. Los mensajes nuevos avisan por la campana.",
+  },
+  {
+    target: '[data-tour="tab-gantt"]',
+    title: "Gantt",
+    body: "El cronograma por fases metodológicas, con avance por tarea y generación asistida por IA.",
+  },
+  {
+    target: '[data-tour="tab-agent"]',
+    title: "Agente IA",
+    body: "Chat con roles expertos que consultan las fuentes del proyecto y proponen texto para el informe.",
+  },
+  {
+    target: '[data-tour="tab-evaluations"]',
+    title: "Evaluación",
+    body: "El evaluador independiente califica el informe contra la rúbrica de método científico (7 criterios) y verifica que las fuentes respalden lo afirmado.",
+  },
+  {
+    target: '[data-tour="tab-metrics"]',
+    title: "Métricas",
+    body: "Aporte por consultor: ediciones, palabras, fuentes subidas y actividad en el tiempo.",
+  },
+  {
+    target: '[data-tour="tab-members"]',
+    title: "Equipo",
+    body: "Quiénes participan y con qué permiso: lectura, escritura o edición total.",
+  },
+  {
+    target: '[data-tour="tab-audit"]',
+    title: "Auditoría",
+    body: "Cada acción del proyecto registrada: quién, qué y cuándo — trazabilidad total.",
+  },
+  {
+    title: "Listo",
+    body: "Dentro del Documento tenés además el botón «? Guía» con el recorrido del editor y el investigador. Esta guía la repetís cuando quieras con el botón ? de arriba.",
+  },
+];
 
 function NavLink({ href, label }: { href: string; label: string }) {
   const pathname = usePathname();
@@ -26,8 +144,16 @@ export default function AppShell({
   fluid?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<CurrentUserInfo | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+
+  // Dentro de un proyecto el botón ? recorre SU navbar; fuera, la guía general
+  const inProject =
+    !!pathname && /^\/projects\/(?!new)[^/]+/.test(pathname);
+  const tourSteps = inProject ? TOUR_PROJECT : TOUR_APP;
+  const tourKey = inProject ? "vex_tour_project_v1" : "vex_tour_app_v1";
 
   useEffect(() => {
     if (!getToken()) {
@@ -38,6 +164,20 @@ export default function AppShell({
     setUser(u);
     if (u?.role === "visualizador") router.replace("/view");
   }, [router]);
+
+  // Se activa sola la primera vez: la general al entrar a la app, y la del
+  // proyecto la primera vez que se abre uno.
+  useEffect(() => {
+    if (!user || user.role === "visualizador") return;
+    if (localStorage.getItem(tourKey)) return;
+    const timer = setTimeout(() => setTourOpen(true), 900);
+    return () => clearTimeout(timer);
+  }, [user, tourKey]);
+
+  const closeTour = () => {
+    localStorage.setItem(tourKey, "1");
+    setTourOpen(false);
+  };
 
   const onLogout = () => {
     clearSession();
@@ -55,14 +195,32 @@ export default function AppShell({
         <div className="mx-auto max-w-7xl px-4 h-16 flex items-center justify-between gap-4">
           <Brand />
           <nav className="hidden md:flex items-center gap-1">
-            <NavLink href="/dashboard" label="Proyectos" />
-            <NavLink href="/metodo" label="Método y fuentes" />
+            <span data-tour="nav-proyectos">
+              <NavLink href="/dashboard" label="Proyectos" />
+            </span>
+            <span data-tour="nav-metodo">
+              <NavLink href="/metodo" label="Método y fuentes" />
+            </span>
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
-            {isLider && <NavLink href="/admin/costos" label="Costos IA" />}
+            {isLider && (
+              <span data-tour="nav-costos">
+                <NavLink href="/admin/costos" label="Costos IA" />
+              </span>
+            )}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
           <div className="flex items-center gap-3">
-            <NotificationBell />
+            <button
+              onClick={() => setTourOpen(true)}
+              className="h-9 w-9 rounded-full bg-brand-primary/10 text-brand-primary font-bold text-base border border-brand-primary/30 hover:bg-brand-primary hover:text-white transition-colors flex items-center justify-center shrink-0"
+              title="Visita guiada: recorré la plataforma paso a paso"
+              aria-label="Visita guiada"
+            >
+              ?
+            </button>
+            <span data-tour="campana">
+              <NotificationBell />
+            </span>
             <div className="hidden sm:block text-right">
               <div className="text-sm font-semibold text-brand-ink leading-tight">
                 {user.full_name}
@@ -121,6 +279,10 @@ export default function AppShell({
           <span>VEX Consulting · Investigación de mercado</span>
         </div>
       </footer>
+
+      {/* Visita guiada (primera vez, o desde el botón ? del header):
+          general en la app, del navbar dentro de un proyecto */}
+      {tourOpen && <GuidedTour steps={tourSteps} onClose={closeTour} />}
     </div>
   );
 }

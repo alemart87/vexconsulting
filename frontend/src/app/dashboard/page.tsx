@@ -42,7 +42,7 @@ export default function DashboardPage() {
           </p>
         </div>
         {isLider && (
-          <Link href="/projects/new" className="btn-primary">
+          <Link href="/projects/new" className="btn-primary" data-tour="nuevo-proyecto">
             + Nuevo proyecto
           </Link>
         )}

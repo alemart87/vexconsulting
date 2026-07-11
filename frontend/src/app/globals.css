@@ -50,9 +50,20 @@ body {
   stroke-width: 2px;
 }
 .markmap-host svg circle {
-  r: 5;
-  stroke-width: 2px;
+  r: 7;
+  stroke-width: 2.5px;
   cursor: pointer;
+  transition: r 0.15s ease;
+}
+.markmap-host svg g.markmap-node:hover > circle {
+  r: 10;
+}
+.markmap-host svg g.markmap-node {
+  cursor: pointer;
+}
+.markmap-host svg g.markmap-node:hover > text,
+.markmap-host svg g.markmap-node:hover text {
+  fill: #e6332a;
 }
 
 /* Scrollbar fina para barras horizontales (ej. navegación de pills) */

@@ -32,6 +32,8 @@ const BRAND_PALETTE = ["#E6332A", "#00B2BF", "#662483", "#F39200", "#2A9D5C", "#
 function useMarkmap(md: string | null | undefined, interactive: boolean) {
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<any>(null);
+  const mdRef = useRef(md);
+  mdRef.current = md;
 
   useEffect(() => {
     if (!md) return;
@@ -68,14 +70,31 @@ function useMarkmap(md: string | null | undefined, interactive: boolean) {
         },
         root
       );
-      // El contenedor recién toma tamaño después del layout: reajustar el
-      // encuadre una vez asentado, y ante cualquier cambio de tamaño.
+      // El contenedor toma tamaño después del layout: re-encuadrar asentado
       const refit = () => mmRef.current?.fit();
       setTimeout(refit, 150);
       setTimeout(refit, 500);
+      setTimeout(refit, 950);
       const ro = new ResizeObserver(refit);
       if (svgRef.current.parentElement) ro.observe(svgRef.current.parentElement);
       (mmRef.current as any).__ro = ro;
+
+      // UX: clic en el TEXTO del nodo también expande/colapsa (los círculos
+      // solos son un blanco demasiado chico).
+      if (interactive) {
+        svgRef.current.addEventListener("click", (e) => {
+          const target = e.target as Element;
+          if (target.tagName === "circle") return; // ya lo maneja markmap
+          const g = target.closest("g.markmap-node") as any;
+          const data = g?.__data__?.data ?? g?.__data__;
+          if (!data?.children?.length) return;
+          try {
+            mmRef.current?.toggleNode?.(data);
+          } catch {
+            /* sin hijos: ignorar */
+          }
+        });
+      }
     })();
     return () => {
       destroyed = true;
@@ -128,11 +147,11 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
           <span className="text-xl">🧠</span>
           <span className="font-display uppercase text-brand-ink truncate">{title}</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
           <Tool label="－" title="Alejar" onClick={() => mmRef.current?.rescale(0.75)} />
           <Tool label="＋" title="Acercar" onClick={() => mmRef.current?.rescale(1.3)} />
           <Tool label="⤢ Ajustar" title="Ajustar el mapa a la pantalla" onClick={() => mmRef.current?.fit()} />
-          <span className="w-px h-6 bg-brand-border mx-1" />
+          <span className="w-px h-6 bg-brand-border mx-0.5" />
           <button className="btn-secondary !py-1.5 text-xs" onClick={downloadSvg}>
             ⬇ SVG
           </button>
@@ -145,8 +164,8 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
         <svg ref={svgRef} className="w-full h-full" />
       </div>
       <div className="px-4 py-2 text-[11px] text-brand-slate border-t border-brand-border shrink-0 bg-brand-bg-soft">
-        ● Clic en un círculo para colapsar/expandir esa rama · rueda del mouse para zoom ·
-        arrastrá el fondo para moverte · «Ajustar» te devuelve a la vista completa
+        💡 Clic en el <b>texto</b> de un nodo (o en su círculo) para expandir/colapsar esa
+        rama · rueda para zoom · arrastrá para moverte · «Ajustar» recompone la vista
       </div>
     </div>
   );

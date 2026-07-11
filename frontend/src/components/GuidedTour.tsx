@@ -42,25 +42,31 @@ export default function GuidedTour({
     }
     const r = el.getBoundingClientRect();
     const vh = window.innerHeight;
-    // Elementos más altos que la pantalla (p. ej. el editor con un documento
-    // largo): el foco destaca solo la porción visible, no el bloque entero.
-    const top = Math.max(r.top, HEADER_CLEAR - 40);
-    const bottom = Math.min(r.bottom, vh - 16);
-    setRect({
-      top,
-      left: r.left,
-      width: r.width,
-      height: Math.max(bottom - top, 40),
-      bottom: Math.max(bottom, top + 40),
-    });
+    // SOLO los elementos más altos que la pantalla (p. ej. el editor con un
+    // documento largo) se recortan a la porción visible. Los elementos
+    // normales usan su rect exacto — clampearlos los desplazaba del lugar.
+    if (r.height > vh * 0.85) {
+      const top = Math.max(r.top, HEADER_CLEAR - 40);
+      const bottom = Math.min(r.bottom, vh - 16);
+      setRect({
+        top,
+        left: r.left,
+        width: r.width,
+        height: Math.max(bottom - top, 40),
+        bottom: Math.max(bottom, top + 40),
+      });
+    } else {
+      setRect({ top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom });
+    }
   }, [step]);
 
   useEffect(() => {
     if (!step) return;
     if (step.target) {
       const el = document.querySelector(step.target) as HTMLElement | null;
-      if (!el) {
-        // El elemento no está en pantalla (p. ej. banner cerrado): saltar paso
+      const size = el?.getBoundingClientRect();
+      if (!el || !size || size.width < 2 || size.height < 2) {
+        // No existe o está oculto (p. ej. menú colapsado en mobile): saltar paso
         if (i < steps.length - 1) setI((v) => v + 1);
         else onClose();
         return;

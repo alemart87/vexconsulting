@@ -424,8 +424,11 @@ export default function DocumentPage() {
   }, [finalEditing, params.id, dirty]);
 
   // Visita guiada de bienvenida: la primera vez que se abre el documento
+  // (después de la guía general de la app, para no encimarse)
   useEffect(() => {
     if (!doc || !editable) return;
+    // Después de la guía del proyecto (navbar), para no encimarse
+    if (!localStorage.getItem("vex_tour_project_v1")) return;
     if (localStorage.getItem("vex_tour_doc_v1")) return;
     const timer = setTimeout(() => startTour(TOUR_INTRO, "vex_tour_doc_v1"), 900);
     return () => clearTimeout(timer);

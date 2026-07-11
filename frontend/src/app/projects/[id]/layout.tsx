@@ -110,6 +110,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                 <Link
                   key={t.href}
                   href={`${base}${t.href}`}
+                  data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
                   className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider2 transition-colors ${
                     isActive(t.href)
                       ? "bg-brand-primary text-white"
