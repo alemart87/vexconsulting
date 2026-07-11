@@ -19,8 +19,16 @@ export default function GuidedTour({
   onClose: () => void;
 }) {
   const [i, setI] = useState(0);
-  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [rect, setRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+    bottom: number;
+  } | null>(null);
   const step = steps[i];
+
+  const HEADER_CLEAR = 128; // header + nav sticky
 
   const measure = useCallback(() => {
     if (!step?.target) {
@@ -28,7 +36,23 @@ export default function GuidedTour({
       return;
     }
     const el = document.querySelector(step.target) as HTMLElement | null;
-    setRect(el ? el.getBoundingClientRect() : null);
+    if (!el) {
+      setRect(null);
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const vh = window.innerHeight;
+    // Elementos más altos que la pantalla (p. ej. el editor con un documento
+    // largo): el foco destaca solo la porción visible, no el bloque entero.
+    const top = Math.max(r.top, HEADER_CLEAR - 40);
+    const bottom = Math.min(r.bottom, vh - 16);
+    setRect({
+      top,
+      left: r.left,
+      width: r.width,
+      height: Math.max(bottom - top, 40),
+      bottom: Math.max(bottom, top + 40),
+    });
   }, [step]);
 
   useEffect(() => {
@@ -41,12 +65,25 @@ export default function GuidedTour({
         else onClose();
         return;
       }
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
-      const timer = setTimeout(measure, 380);
+      // Scroll INSTANTÁNEO y calculado (nada de scrollIntoView center: con un
+      // documento largo centraba el editor y mandaba la vista al fondo). Los
+      // elementos altos se alinean por su INICIO, bajo el header; los chicos
+      // se centran. Medimos recién después de dos frames, con el layout quieto.
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const targetY =
+        r.height > vh * 0.55
+          ? window.scrollY + r.top - HEADER_CLEAR
+          : window.scrollY + r.top - Math.max((vh - r.height) / 2, HEADER_CLEAR);
+      window.scrollTo({ top: Math.max(0, targetY), behavior: "auto" });
+      let raf = 0;
+      raf = requestAnimationFrame(() => {
+        raf = requestAnimationFrame(measure);
+      });
       window.addEventListener("resize", measure);
       window.addEventListener("scroll", measure, true);
       return () => {
-        clearTimeout(timer);
+        cancelAnimationFrame(raf);
         window.removeEventListener("resize", measure);
         window.removeEventListener("scroll", measure, true);
       };
@@ -70,14 +107,29 @@ export default function GuidedTour({
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;
   const cardW = Math.min(360, vw - 24);
 
-  // Posición de la tarjeta: debajo del foco si entra, si no encima; centrada sin foco
+  // Posición de la tarjeta: debajo del foco si entra; si no encima; si el foco
+  // ocupa (casi) toda la pantalla, flotante al costado — nunca cortada.
+  const CARD_EST = 240; // alto estimado de la tarjeta
   let cardStyle: React.CSSProperties;
   if (rect) {
-    const below = rect.bottom + 240 < vh;
-    const left = Math.min(Math.max(rect.left, 12), vw - cardW - 12);
-    cardStyle = below
-      ? { top: rect.bottom + 14, left, width: cardW }
-      : { bottom: vh - rect.top + 14, left, width: cardW };
+    const spaceBelow = vh - rect.bottom;
+    const spaceAbove = rect.top;
+    const leftAligned = Math.min(Math.max(rect.left, 12), vw - cardW - 12);
+    if (spaceBelow >= CARD_EST + 16) {
+      cardStyle = { top: rect.bottom + 14, left: leftAligned, width: cardW };
+    } else if (spaceAbove >= CARD_EST + 16) {
+      cardStyle = { bottom: vh - rect.top + 14, left: leftAligned, width: cardW };
+    } else {
+      const rightX = rect.left + rect.width + 16;
+      const leftX = rect.left - cardW - 16;
+      const x =
+        rightX + cardW <= vw - 12 ? rightX : leftX >= 12 ? leftX : vw - cardW - 12;
+      cardStyle = {
+        top: Math.max(HEADER_CLEAR + 8, Math.min(rect.top + 24, vh - CARD_EST - 12)),
+        left: x,
+        width: cardW,
+      };
+    }
   } else {
     cardStyle = { top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: cardW };
   }
