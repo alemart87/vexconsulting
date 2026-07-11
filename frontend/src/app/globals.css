@@ -28,10 +28,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Nunca desbordar horizontalmente la ventana en mobile */
+/* Nunca desbordar horizontalmente en mobile. `clip` (no `hidden`) evita crear
+   un contenedor de scroll que rompería position: sticky del header y el nav. */
 html,
 body {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100%;
 }
 

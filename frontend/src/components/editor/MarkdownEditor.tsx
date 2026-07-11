@@ -145,7 +145,7 @@ export default function MarkdownEditor({
     // contenedor de scroll y la barra sticky queda empujada 64px, tapando el título.
     <div className="card overflow-clip">
       {editable && (
-        <div className="flex flex-wrap items-center gap-0.5 border-b border-brand-border bg-brand-bg-soft px-2 py-1.5 sticky top-16 z-30">
+        <div className="flex flex-wrap items-center gap-0.5 border-b border-brand-border bg-brand-bg-soft px-2 py-1.5 sticky top-[120px] z-20">
           <ToolbarButton title="Título 1" active={editor.isActive("heading", { level: 1 })}
             onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>H1</ToolbarButton>
           <ToolbarButton title="Título 2" active={editor.isActive("heading", { level: 2 })}

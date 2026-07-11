@@ -72,9 +72,9 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             </div>
           </div>
 
-          {/* Navegación del proyecto — mobile: dropdown; desktop: pills */}
-          <div className="mb-5 sm:mb-6">
-            {/* Mobile: selector compacto */}
+          {/* Navegación del proyecto — sticky bajo el header; mobile: dropdown; desktop: pills */}
+          <div className="sticky top-16 z-30 -mx-4 px-4 pt-1 pb-3 mb-4 bg-brand-bg/95 backdrop-blur-sm border-b border-brand-border/60">
+            {/* Mobile: selector claro y legible */}
             <div className="md:hidden">
               <label className="sr-only" htmlFor="project-nav">
                 Sección del proyecto
@@ -84,15 +84,20 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                   id="project-nav"
                   value={currentTab?.href ?? ""}
                   onChange={(e) => router.push(`${base}${e.target.value}`)}
-                  className="w-full appearance-none rounded-lg bg-brand-ink text-white font-semibold text-sm pl-4 pr-10 py-3 focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  style={{ colorScheme: "light" }}
+                  className="w-full appearance-none rounded-lg bg-white text-brand-ink font-semibold text-sm border-l-4 border-l-brand-primary border border-brand-border shadow-soft pl-4 pr-10 py-3 focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 >
                   {visibleTabs.map((t) => (
-                    <option key={t.href} value={t.href} className="text-brand-ink">
+                    <option
+                      key={t.href}
+                      value={t.href}
+                      style={{ background: "#fff", color: "#0F1116" }}
+                    >
                       {t.label}
                     </option>
                   ))}
                 </select>
-                <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/70 text-xs">
+                <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-brand-primary text-xs">
                   ▼
                 </span>
               </div>
