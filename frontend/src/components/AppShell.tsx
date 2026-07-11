@@ -58,6 +58,7 @@ export default function AppShell({
             <NavLink href="/dashboard" label="Proyectos" />
             <NavLink href="/metodo" label="Método y fuentes" />
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
+            {isLider && <NavLink href="/admin/costos" label="Costos IA" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
           <div className="flex items-center gap-3">
@@ -90,6 +91,7 @@ export default function AppShell({
             <NavLink href="/dashboard" label="Proyectos" />
             <NavLink href="/metodo" label="Método y fuentes" />
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
+            {isLider && <NavLink href="/admin/costos" label="Costos IA" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
         )}

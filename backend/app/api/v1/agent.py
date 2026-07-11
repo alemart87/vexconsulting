@@ -61,6 +61,7 @@ class ResearchRequest(BaseModel):
     rigor: str = "estandar"  # estandar | academico (prioriza fuentes revisadas por pares)
     conversation_id: str | None = None  # hilo de investigación con memoria (30 mensajes)
     attachment_source_ids: list[str] | None = None  # adjuntos de esta consulta (ya indexados)
+    focus_source_ids: list[str] | None = None  # fuentes citadas con @ (restringen la base interna)
 
 
 @router.get("/agent/roles")
@@ -878,14 +879,33 @@ async def _chart_task(
 async def _project_grounding(
     db: AsyncSession, project_id: str, query: str,
     attachment_source_ids: list[str] | None = None,
+    focus_source_ids: list[str] | None = None,
 ) -> str:
     from sqlalchemy import select as _select
 
+    from ...models.document import Document
     from ...models.source import Source
     from ...models.source_chunk import SourceChunk
     from ...services.rag.retriever import format_citation, search_chunks
 
     parts: list[str] = []
+
+    # Estado actual del informe: el agente entra con el contexto ya cargado
+    # (esquema + inicio); el texto completo sigue disponible por tool.
+    try:
+        doc = (await db.execute(
+            _select(Document).where(Document.project_id == project_id)
+        )).scalar_one_or_none()
+        if doc and (doc.content_md or "").strip():
+            outline = [ln.strip() for ln in doc.content_md.splitlines() if ln.startswith("#")][:30]
+            parts.append(
+                f"ESTADO ACTUAL DEL INFORME ({doc.word_count} palabras). Esquema:\n"
+                + "\n".join(outline)
+                + "\n\nInicio del informe:\n" + doc.content_md[:1800]
+                + "\n(…texto completo disponible con `leer_documento_maestro`)"
+            )
+    except Exception:
+        pass
 
     # Catálogo: el investigador conoce la base de conocimiento del proyecto
     try:
@@ -930,9 +950,44 @@ async def _project_grounding(
         except Exception:
             pass
 
-    # Fragmentos afines a la consulta (RAG híbrido)
+    # Fuentes citadas con @: entran con prioridad y restringen la base interna
+    if focus_source_ids:
+        try:
+            rows = await db.execute(
+                _select(SourceChunk, Source.title)
+                .join(Source, Source.id == SourceChunk.source_id)
+                .where(
+                    SourceChunk.source_id.in_(focus_source_ids[:6]),
+                    SourceChunk.project_id == project_id,
+                )
+                .order_by(SourceChunk.source_id, SourceChunk.chunk_index)
+            )
+            budget = 8000
+            focus_parts = []
+            for chunk, title in rows:
+                if budget <= 0:
+                    break
+                fragment = chunk.content[:budget]
+                focus_parts.append(f"[{title}]\n{fragment}")
+                budget -= len(fragment)
+            if focus_parts:
+                parts.append(
+                    "FUENTES CITADAS CON @ POR EL CONSULTOR — la investigación sobre la "
+                    "base interna debe basarse EXCLUSIVAMENTE en estas fuentes (la tool "
+                    "`buscar_fuentes_internas` ya viene restringida a ellas):\n"
+                    + "\n\n".join(focus_parts)
+                )
+        except Exception:
+            pass
+
+    # Fragmentos afines a la consulta (RAG híbrido; con @ se restringe a las citadas)
     try:
-        chunks = await search_chunks(db, project_id, query, k=6)
+        chunks = await search_chunks(
+            db, project_id, query, k=24 if focus_source_ids else 6
+        )
+        if focus_source_ids:
+            allowed = set(focus_source_ids)
+            chunks = [c for c in chunks if c.get("source_id") in allowed][:6]
         if chunks:
             parts.append(
                 "FRAGMENTOS DE FUENTES INTERNAS AFINES A LA CONSULTA (citá con el formato dado):\n"
@@ -1005,6 +1060,7 @@ async def research(
         rigor=payload.rigor,
         context_text=payload.context_text,
         attachment_ids=payload.attachment_source_ids,
+        focus_ids=payload.focus_source_ids,
         user_info={
             "id": access.user.id, "email": access.user.email,
             "role": access.user.role, "name": access.user.full_name,
@@ -1022,6 +1078,7 @@ async def _run_research_job(
     *, message_id: str, conversation_id: str, project_id: str, project_name: str,
     query: str, engine: str, rigor: str, context_text: str | None,
     attachment_ids: list[str] | None, user_info: dict, ip: str,
+    focus_ids: list[str] | None = None,
 ) -> None:
     """Trabajo de investigación en segundo plano (sobrevive a la navegación).
 
@@ -1031,13 +1088,16 @@ async def _run_research_job(
     answer = ""
     unique_citations: list[dict] = []
     cost_usd = 0.0
+    cost_breakdown: dict = {}
     engine_used = "vex"
     error: str | None = None
 
     try:
         async with session_scope() as db:
             history_block = await _load_research_history(db, conversation_id, generous=True)
-            grounding = await _project_grounding(db, project_id, query, attachment_ids)
+            grounding = await _project_grounding(
+                db, project_id, query, attachment_ids, focus_ids
+            )
         context_block = (
             f"\n\nCONTEXTO DEL DOCUMENTO EN EDICIÓN:\n{context_text[-4000:]}"
             if context_text else ""
@@ -1048,13 +1108,14 @@ async def _run_research_job(
 
         from ...services.agent.researcher import run_researcher
 
-        answer, citations, cost_usd = await run_researcher(
+        answer, citations, cost_usd, cost_breakdown = await run_researcher(
             project_name=project_name,
             project_id=project_id,
             user_id=user_info["id"],
             user_name=user_info.get("name") or "consultor",
             prompt=user_prompt,
             rigor=rigor,
+            focus_source_ids=focus_ids,
         )
         if not answer:
             raise RuntimeError("El investigador no produjo respuesta")
@@ -1093,6 +1154,10 @@ async def _run_research_job(
                 message.content = answer
                 message.tool_calls = {
                     "status": "done", "citations": unique_citations, "engine": engine_used,
+                    # Desglose por proveedor/modelo para el tracking de gasto IA
+                    "model": cost_breakdown.get("model"),
+                    "cost_openai": cost_breakdown.get("openai"),
+                    "cost_perplexity": cost_breakdown.get("perplexity"),
                 }
                 message.cost_usd = cost_usd or None
             conversation = await db.get(Conversation, conversation_id)

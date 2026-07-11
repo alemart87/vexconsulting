@@ -1,31 +1,44 @@
 """Render de gráficos a SVG con identidad Voicenter (sin dependencias externas).
 
-El analista (GPT) produce una especificación JSON; acá se dibuja: barras
-agrupadas o líneas multi-serie, con ejes, grilla, leyenda y valores.
+El agente produce una especificación JSON; acá se dibuja:
+- bar   : barras agrupadas (multi-serie)
+- line  : líneas multi-serie con área sutil
+- barh  : barras horizontales (rankings / comparación entre países o empresas)
+- donut : participación / composición (una serie)
+
+Elementos analíticos: `destacar` (resalta una categoría en rojo y agrisa el
+resto — ideal para «Paraguay vs. el mundo»), `linea_referencia`
+({valor, etiqueta} — meta o benchmark) y `promedio` (línea punteada con el
+promedio de la primera serie).
+
 El SVG se guarda como imagen del proyecto → se inserta en el documento y
 viaja a la vista previa y al export PDF.
 """
 from __future__ import annotations
 
 import html
+import math
 from typing import Any
 
 BRAND_COLORS = ["#E6332A", "#00B2BF", "#662483", "#F39200", "#2A9D5C", "#5B6275"]
+MUTED = "#C6CAD3"
+HIGHLIGHT = "#E6332A"
 
 WIDTH, HEIGHT = 960, 560
 MARGIN_L, MARGIN_R = 82, 36
-# El margen superior/inferior se calcula según título/subtítulo/leyenda/fuente
 
 
 def _esc(text: Any) -> str:
     return html.escape(str(text))[:60]
 
 
+def _esc_long(text: Any, max_len: int) -> str:
+    return html.escape(str(text))[:max_len]
+
+
 def _nice_max(value: float) -> float:
     if value <= 0:
         return 1.0
-    import math
-
     exp = math.floor(math.log10(value))
     frac = value / (10 ** exp)
     nice = 1 if frac <= 1 else 2 if frac <= 2 else 5 if frac <= 5 else 10
@@ -40,8 +53,13 @@ def _fmt(v: float) -> str:
     return f"{v:.1f}".replace(".", ",")
 
 
+def _is_highlighted(label: str, destacar: str) -> bool:
+    return bool(destacar) and destacar.lower() in label.lower()
+
+
 def render_chart_svg(spec: dict) -> str:
-    """spec = {type: 'bar'|'line', title?, subtitle?, source?, y_label?,
+    """spec = {type: 'bar'|'line'|'barh'|'donut', title?, subtitle?, source?,
+    y_label?, destacar?, linea_referencia?: {valor, etiqueta}, promedio?: bool,
     series: [{name, points: [{label, value}]}]}"""
     chart_type = (spec.get("type") or "bar").lower()
     series = spec.get("series") or []
@@ -53,6 +71,16 @@ def render_chart_svg(spec: dict) -> str:
     subtitle = str(spec.get("subtitle") or "").strip()
     source = str(spec.get("source") or "").strip()
     y_label = str(spec.get("y_label") or "").strip()
+    destacar = str(spec.get("destacar") or spec.get("highlight") or "").strip()
+    promedio = bool(spec.get("promedio"))
+    ref = spec.get("linea_referencia") or spec.get("ref_line") or None
+    ref_val, ref_label = None, ""
+    if isinstance(ref, dict):
+        try:
+            ref_val = float(ref.get("valor") if ref.get("valor") is not None else ref.get("value"))
+            ref_label = str(ref.get("etiqueta") or ref.get("label") or "").strip()
+        except (TypeError, ValueError):
+            ref_val = None
 
     labels: list[str] = []
     for s in series:
@@ -74,10 +102,12 @@ def render_chart_svg(spec: dict) -> str:
                     v = 0.0
                 values[(i, lbl)] = v
                 max_val = max(max_val, v)
+    if ref_val:
+        max_val = max(max_val, ref_val)
 
     y_max = _nice_max(max_val * 1.12)
 
-    # Layout vertical dinámico: título / subtítulo / leyenda / plot / eje X / fuente
+    # ----- Layout vertical: título / subtítulo / leyenda / plot / fuente -----
     y_cursor = 16
     title_y = subtitle_y = legend_y = 0
     if title:
@@ -88,33 +118,19 @@ def render_chart_svg(spec: dict) -> str:
         y_cursor += 8
         subtitle_y = y_cursor
         y_cursor += 6
-    if len(series) > 1:
+    show_legend = len(series) > 1 and chart_type != "donut"
+    if show_legend:
         y_cursor += 14
         legend_y = y_cursor
         y_cursor += 6
     margin_t = y_cursor + 14
 
-    rotate = any(len(l) > 9 for l in labels) or len(labels) > 8
-    x_band = 78 if rotate else 34
-    margin_b = x_band + (26 if source else 14)
-
-    plot_w = WIDTH - MARGIN_L - MARGIN_R
-    plot_h = HEIGHT - margin_t - margin_b
-
-    def sx(idx: int) -> float:
-        return MARGIN_L + plot_w * (idx + 0.5) / len(labels)
-
-    def sy(val: float) -> float:
-        return margin_t + plot_h * (1 - val / y_max)
-
     parts: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" '
         f'font-family="Segoe UI, Arial, sans-serif" font-size="12.5">',
         f'<rect width="{WIDTH}" height="{HEIGHT}" fill="white"/>',
-        # Banda de marca superior
         f'<rect x="0" y="0" width="{WIDTH}" height="4" fill="#E6332A"/>',
     ]
-
     if title:
         parts.append(
             f'<text x="{MARGIN_L}" y="{title_y}" font-size="17" font-weight="700" '
@@ -125,9 +141,7 @@ def render_chart_svg(spec: dict) -> str:
             f'<text x="{MARGIN_L}" y="{subtitle_y}" font-size="12" fill="#5B6275">'
             f'{_esc_long(subtitle, 110)}</text>'
         )
-
-    # Leyenda (chips)
-    if len(series) > 1:
+    if show_legend:
         lx = MARGIN_L
         for i, s in enumerate(series):
             color = BRAND_COLORS[i % len(BRAND_COLORS)]
@@ -140,7 +154,52 @@ def render_chart_svg(spec: dict) -> str:
             )
             lx += 16 + int(6.8 * len(name)) + 26
 
-    # Grilla horizontal y valores del eje Y
+    footer_y = HEIGHT - 10
+
+    if chart_type == "donut":
+        _draw_donut(parts, series[0], labels, values, margin_t, footer_y, destacar)
+    elif chart_type == "barh":
+        _draw_barh(parts, series[0], labels, values, margin_t, footer_y, source,
+                   destacar, y_max, ref_val, ref_label, y_label)
+    else:
+        _draw_xy(parts, chart_type, series, labels, values, margin_t, source,
+                 destacar, y_max, ref_val, ref_label, promedio, y_label)
+
+    if source:
+        parts.append(
+            f'<text x="{MARGIN_L}" y="{footer_y}" fill="#9CA3AF" font-size="10.5">'
+            f'Fuente: {_esc_long(source, 100)}</text>'
+        )
+    parts.append(
+        f'<text x="{WIDTH - MARGIN_R}" y="{footer_y}" text-anchor="end" fill="#9CA3AF" '
+        f'font-size="10">VEX Consulting · Voicenter S.A.</text>'
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Barras verticales agrupadas y líneas (con referencia, promedio y destacado)
+# ---------------------------------------------------------------------------
+
+def _draw_xy(parts: list[str], chart_type: str, series: list, labels: list[str],
+             values: dict, margin_t: int, source: str, destacar: str,
+             y_max: float, ref_val: float | None, ref_label: str,
+             promedio: bool, y_label: str) -> None:
+    rotate = any(len(l) > 9 for l in labels) or len(labels) > 8
+    x_band = 78 if rotate else 34
+    margin_b = x_band + (26 if source else 14)
+    plot_w = WIDTH - MARGIN_L - MARGIN_R
+    plot_h = HEIGHT - margin_t - margin_b
+
+    def sx(idx: int) -> float:
+        return MARGIN_L + plot_w * (idx + 0.5) / len(labels)
+
+    def sy(val: float) -> float:
+        return margin_t + plot_h * (1 - val / y_max)
+
+    x_base = margin_t + plot_h
+
     for i in range(6):
         y_val = y_max * i / 5
         y = sy(y_val)
@@ -153,23 +212,24 @@ def render_chart_svg(spec: dict) -> str:
             f'fill="#5B6275" font-size="11.5">{_fmt(y_val)}</text>'
         )
 
-    # Etiquetas X
-    x_base = margin_t + plot_h
     for idx, lbl in enumerate(labels):
         x = sx(idx)
+        hl = _is_highlighted(lbl, destacar)
         parts.append(
             f'<line x1="{x:.1f}" y1="{x_base:.1f}" x2="{x:.1f}" y2="{x_base + 4:.1f}" '
             f'stroke="#D7DAE0" stroke-width="1"/>'
         )
+        weight = ' font-weight="700"' if hl else ""
+        fill = HIGHLIGHT if hl else "#2A2F3A"
         if rotate:
             parts.append(
-                f'<text x="{x:.1f}" y="{x_base + 16}" text-anchor="end" fill="#2A2F3A" '
+                f'<text x="{x:.1f}" y="{x_base + 16}" text-anchor="end" fill="{fill}"{weight} '
                 f'font-size="11.5" transform="rotate(-38 {x:.1f} {x_base + 16})">{_esc(lbl)}</text>'
             )
         else:
             parts.append(
                 f'<text x="{x:.1f}" y="{x_base + 20}" text-anchor="middle" '
-                f'fill="#2A2F3A" font-size="11.5">{_esc(lbl)}</text>'
+                f'fill="{fill}"{weight} font-size="11.5">{_esc(lbl)}</text>'
             )
 
     if chart_type == "line":
@@ -181,7 +241,6 @@ def render_chart_svg(spec: dict) -> str:
                 if v is not None:
                     pts.append((sx(idx), sy(v), v))
             if len(pts) >= 2:
-                # Área sutil bajo la línea (solo primera serie, para no ensuciar)
                 if i == 0:
                     area = (
                         f"M {pts[0][0]:.1f},{x_base:.1f} "
@@ -211,11 +270,15 @@ def render_chart_svg(spec: dict) -> str:
         show_values = len(labels) * len(series) <= 24
         for idx, lbl in enumerate(labels):
             x0 = sx(idx) - group_w / 2
+            hl = _is_highlighted(lbl, destacar)
             for i in range(len(series)):
                 v = values.get((i, lbl))
                 if v is None:
                     continue
-                color = BRAND_COLORS[i % len(BRAND_COLORS)]
+                if destacar and len(series) == 1:
+                    color = HIGHLIGHT if hl else MUTED
+                else:
+                    color = BRAND_COLORS[i % len(BRAND_COLORS)]
                 x = x0 + i * bar_w
                 y = sy(v)
                 h = x_base - y
@@ -224,12 +287,40 @@ def render_chart_svg(spec: dict) -> str:
                     f'height="{max(h, 0):.1f}" fill="{color}" rx="3"/>'
                 )
                 if show_values:
+                    vfill = HIGHLIGHT if (hl and len(series) == 1 and destacar) else "#2A2F3A"
                     parts.append(
                         f'<text x="{x + bar_w * 0.44:.1f}" y="{y - 6:.1f}" text-anchor="middle" '
-                        f'fill="#2A2F3A" font-weight="700" font-size="11">{_fmt(v)}</text>'
+                        f'fill="{vfill}" font-weight="700" font-size="11">{_fmt(v)}</text>'
                     )
 
-    # Etiqueta del eje Y (unidad)
+    # Línea de promedio (primera serie)
+    if promedio:
+        vals = [values[(0, l)] for l in labels if (0, l) in values]
+        if vals:
+            avg = sum(vals) / len(vals)
+            y = sy(avg)
+            parts.append(
+                f'<line x1="{MARGIN_L}" y1="{y:.1f}" x2="{WIDTH - MARGIN_R}" y2="{y:.1f}" '
+                f'stroke="#5B6275" stroke-width="1.6" stroke-dasharray="6 4"/>'
+            )
+            parts.append(
+                f'<text x="{WIDTH - MARGIN_R - 4}" y="{y - 6:.1f}" text-anchor="end" '
+                f'fill="#5B6275" font-size="10.5" font-weight="600">Promedio: {_fmt(avg)}</text>'
+            )
+
+    # Línea de referencia / meta / benchmark
+    if ref_val:
+        y = sy(ref_val)
+        parts.append(
+            f'<line x1="{MARGIN_L}" y1="{y:.1f}" x2="{WIDTH - MARGIN_R}" y2="{y:.1f}" '
+            f'stroke="#662483" stroke-width="1.8" stroke-dasharray="8 5"/>'
+        )
+        label = f"{ref_label}: {_fmt(ref_val)}" if ref_label else _fmt(ref_val)
+        parts.append(
+            f'<text x="{MARGIN_L + 4}" y="{y - 6:.1f}" fill="#662483" font-size="10.5" '
+            f'font-weight="700">{_esc_long(label, 60)}</text>'
+        )
+
     if y_label:
         mid_y = margin_t + plot_h / 2
         parts.append(
@@ -237,23 +328,156 @@ def render_chart_svg(spec: dict) -> str:
             f'font-weight="600" transform="rotate(-90 18 {mid_y:.0f})">{_esc(y_label)}</text>'
         )
 
-    # Fuente + marca
-    footer_y = HEIGHT - 10
-    if source:
+
+# ---------------------------------------------------------------------------
+# Barras horizontales (rankings)
+# ---------------------------------------------------------------------------
+
+def _draw_barh(parts: list[str], serie: dict, labels: list[str], values: dict,
+               margin_t: int, footer_y: int, source: str, destacar: str,
+               y_max: float, ref_val: float | None, ref_label: str,
+               y_label: str) -> None:
+    label_w = 190
+    left = MARGIN_L + label_w - 60
+    plot_w = WIDTH - left - MARGIN_R - 60  # espacio para el valor al final
+    margin_b = 26 if source else 14
+    plot_h = HEIGHT - margin_t - margin_b - 18
+
+    rows = [(l, values.get((0, l))) for l in labels if values.get((0, l)) is not None]
+    if not rows:
+        raise ValueError("El gráfico no tiene datos")
+    n = len(rows)
+    row_h = min(44.0, plot_h / n)
+    bar_h = row_h * 0.62
+
+    def sx(val: float) -> float:
+        return left + plot_w * (val / y_max)
+
+    # Grilla vertical
+    for i in range(6):
+        v = y_max * i / 5
+        x = sx(v)
         parts.append(
-            f'<text x="{MARGIN_L}" y="{footer_y}" fill="#9CA3AF" font-size="10.5">'
-            f'Fuente: {_esc_long(source, 100)}</text>'
+            f'<line x1="{x:.1f}" y1="{margin_t}" x2="{x:.1f}" y2="{margin_t + n * row_h:.1f}" '
+            f'stroke="{"#D7DAE0" if i == 0 else "#EDEFF3"}" stroke-width="1"/>'
         )
+        parts.append(
+            f'<text x="{x:.1f}" y="{margin_t + n * row_h + 16:.1f}" text-anchor="middle" '
+            f'fill="#5B6275" font-size="11">{_fmt(v)}</text>'
+        )
+
+    for i, (lbl, v) in enumerate(rows):
+        y = margin_t + i * row_h + (row_h - bar_h) / 2
+        hl = _is_highlighted(lbl, destacar)
+        color = (HIGHLIGHT if hl else MUTED) if destacar else BRAND_COLORS[0]
+        parts.append(
+            f'<text x="{left - 10}" y="{y + bar_h / 2 + 4:.1f}" text-anchor="end" '
+            f'fill="{HIGHLIGHT if hl else "#2A2F3A"}" font-size="12"'
+            f'{" font-weight=\"700\"" if hl else ""}>{_esc(lbl)}</text>'
+        )
+        parts.append(
+            f'<rect x="{left}" y="{y:.1f}" width="{max(sx(v) - left, 1):.1f}" '
+            f'height="{bar_h:.1f}" fill="{color}" rx="3"/>'
+        )
+        parts.append(
+            f'<text x="{sx(v) + 8:.1f}" y="{y + bar_h / 2 + 4:.1f}" '
+            f'fill="{HIGHLIGHT if hl else "#2A2F3A"}" font-weight="700" '
+            f'font-size="11.5">{_fmt(v)}</text>'
+        )
+
+    if ref_val:
+        x = sx(ref_val)
+        parts.append(
+            f'<line x1="{x:.1f}" y1="{margin_t - 4}" x2="{x:.1f}" '
+            f'y2="{margin_t + n * row_h + 4:.1f}" stroke="#662483" stroke-width="1.8" '
+            f'stroke-dasharray="8 5"/>'
+        )
+        label = f"{ref_label}: {_fmt(ref_val)}" if ref_label else _fmt(ref_val)
+        parts.append(
+            f'<text x="{x:.1f}" y="{margin_t - 8}" text-anchor="middle" fill="#662483" '
+            f'font-size="10.5" font-weight="700">{_esc_long(label, 60)}</text>'
+        )
+
+    if y_label:
+        parts.append(
+            f'<text x="{left + plot_w / 2:.0f}" y="{margin_t + n * row_h + 32:.1f}" '
+            f'text-anchor="middle" fill="#5B6275" font-size="11.5" font-weight="600">'
+            f'{_esc(y_label)}</text>'
+        )
+
+
+# ---------------------------------------------------------------------------
+# Donut (participación / composición)
+# ---------------------------------------------------------------------------
+
+def _draw_donut(parts: list[str], serie: dict, labels: list[str], values: dict,
+                margin_t: int, footer_y: int, destacar: str) -> None:
+    rows = [(l, values.get((0, l))) for l in labels if (values.get((0, l)) or 0) > 0][:8]
+    total = sum(v for _, v in rows)
+    if total <= 0:
+        raise ValueError("El gráfico no tiene datos positivos")
+
+    avail_h = footer_y - margin_t - 24
+    cx = MARGIN_L + 210
+    cy = margin_t + avail_h / 2 + 6
+    r_out = min(avail_h / 2 - 6, 165.0)
+    r_in = r_out * 0.62
+
+    angle = -math.pi / 2  # arranca arriba
+    for i, (lbl, v) in enumerate(rows):
+        frac = v / total
+        a0, a1 = angle, angle + frac * 2 * math.pi
+        angle = a1
+        hl = _is_highlighted(lbl, destacar)
+        color = BRAND_COLORS[i % len(BRAND_COLORS)]
+        if destacar:
+            color = HIGHLIGHT if hl else MUTED if not hl else color
+        # Sector como path anular
+        large = 1 if (a1 - a0) > math.pi else 0
+        x0o, y0o = cx + r_out * math.cos(a0), cy + r_out * math.sin(a0)
+        x1o, y1o = cx + r_out * math.cos(a1), cy + r_out * math.sin(a1)
+        x0i, y0i = cx + r_in * math.cos(a1), cy + r_in * math.sin(a1)
+        x1i, y1i = cx + r_in * math.cos(a0), cy + r_in * math.sin(a0)
+        parts.append(
+            f'<path d="M {x0o:.1f},{y0o:.1f} A {r_out:.1f},{r_out:.1f} 0 {large} 1 '
+            f'{x1o:.1f},{y1o:.1f} L {x0i:.1f},{y0i:.1f} A {r_in:.1f},{r_in:.1f} 0 {large} 0 '
+            f'{x1i:.1f},{y1i:.1f} Z" fill="{color}" stroke="white" stroke-width="2"/>'
+        )
+        # Porcentaje sobre el sector (si es legible)
+        if frac >= 0.06:
+            mid = (a0 + a1) / 2
+            rx = cx + (r_out + r_in) / 2 * math.cos(mid)
+            ry = cy + (r_out + r_in) / 2 * math.sin(mid)
+            parts.append(
+                f'<text x="{rx:.1f}" y="{ry + 4:.1f}" text-anchor="middle" fill="white" '
+                f'font-weight="700" font-size="12">{frac * 100:.0f}%</text>'
+            )
+
+    # Total al centro
     parts.append(
-        f'<text x="{WIDTH - MARGIN_R}" y="{footer_y}" text-anchor="end" fill="#9CA3AF" '
-        f'font-size="10">VEX Consulting · Voicenter S.A.</text>'
+        f'<text x="{cx:.1f}" y="{cy - 2:.1f}" text-anchor="middle" fill="#0F1116" '
+        f'font-display="true" font-weight="700" font-size="22">{_fmt(total)}</text>'
     )
-    parts.append("</svg>")
-    return "".join(parts)
+    parts.append(
+        f'<text x="{cx:.1f}" y="{cy + 16:.1f}" text-anchor="middle" fill="#5B6275" '
+        f'font-size="10.5">total</text>'
+    )
 
-
-def _esc_long(text: Any, max_len: int) -> str:
-    return html.escape(str(text))[:max_len]
+    # Leyenda a la derecha con valores
+    lx = cx + r_out + 56
+    ly = cy - (len(rows) * 26) / 2 + 8
+    for i, (lbl, v) in enumerate(rows):
+        hl = _is_highlighted(lbl, destacar)
+        color = BRAND_COLORS[i % len(BRAND_COLORS)]
+        if destacar:
+            color = HIGHLIGHT if hl else MUTED
+        y = ly + i * 26
+        parts.append(f'<rect x="{lx}" y="{y - 11}" width="12" height="12" fill="{color}" rx="3"/>')
+        parts.append(
+            f'<text x="{lx + 18}" y="{y}" fill="{HIGHLIGHT if hl else "#2A2F3A"}" '
+            f'font-size="12.5"{" font-weight=\"700\"" if hl else ""}>{_esc(lbl)}'
+            f' — {_fmt(v)} ({v / total * 100:.0f}%)</text>'
+        )
 
 
 def spec_to_markdown_table(spec: dict) -> str:

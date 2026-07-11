@@ -118,6 +118,11 @@ export default function DocumentPage() {
   const [panelError, setPanelError] = useState("");
   const threadEndRef = useRef<HTMLDivElement>(null);
 
+  // ---- @fuentes: citar fuentes específicas (restringen la base interna) ----
+  const [projectSources, setProjectSources] = useState<{ id: string; title: string }[]>([]);
+  const [focusSources, setFocusSources] = useState<{ id: string; title: string }[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+
   // ---- Multimodal: adjuntos (imagen/voz) del investigador ----
   const [attachments, setAttachments] = useState<{ source_id: string; title: string }[]>([]);
   const [attaching, setAttaching] = useState(false);
@@ -221,6 +226,14 @@ export default function DocumentPage() {
 
   useEffect(() => {
     apiFetch<any>("/api/v1/agent/capabilities").then(setCapabilities).catch(() => {});
+    // Fuentes listas del proyecto, para citarlas con @ en el investigador
+    apiFetch<any[]>(`/api/v1/projects/${params.id}/sources`)
+      .then((list) =>
+        setProjectSources(
+          list.filter((s) => s.status === "ready").map((s) => ({ id: s.id, title: s.title }))
+        )
+      )
+      .catch(() => {});
     // Cargar TODOS los hilos de investigación y retomar el más reciente
     loadConvList()
       .then((convs) => {
@@ -403,6 +416,9 @@ export default function DocumentPage() {
           conversation_id: convId || undefined,
           attachment_source_ids: attachments.length
             ? attachments.map((a) => a.source_id)
+            : undefined,
+          focus_source_ids: focusSources.length
+            ? focusSources.map((f) => f.id)
             : undefined,
         }),
       });
@@ -712,6 +728,30 @@ export default function DocumentPage() {
 
                 {editable && (
                   <>
+                    {focusSources.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap items-center">
+                        <span className="text-[10px] uppercase tracking-wider2 text-brand-purple font-bold">
+                          Solo estas fuentes:
+                        </span>
+                        {focusSources.map((f) => (
+                          <span
+                            key={f.id}
+                            className="inline-flex items-center gap-1 rounded-full bg-brand-purple/10 text-brand-purple text-[11px] font-semibold px-2.5 py-1"
+                          >
+                            📚 {f.title.slice(0, 36)}
+                            <button
+                              className="hover:text-brand-primary"
+                              onClick={() =>
+                                setFocusSources((prev) => prev.filter((x) => x.id !== f.id))
+                              }
+                              title="Quitar la restricción"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {(attachments.length > 0 || attaching || recording) && (
                       <div className="flex gap-1.5 flex-wrap items-center">
                         {attachments.map((a) => (
@@ -772,24 +812,68 @@ export default function DocumentPage() {
                           e.currentTarget.value = "";
                         }}
                       />
-                      <textarea
-                        className="input !py-2 text-[13px] resize-none flex-1"
-                        rows={2}
-                        placeholder={
-                          thread.length
-                            ? "Continuá: «profundizá en Paraguay», «creame un gráfico de barras con las tarifas por país», «verificá esa cifra»…"
-                            : "¿Qué investigamos? Ej.: «migración de voz a canales digitales en BPO, últimos 10 años»"
-                        }
-                        value={aiQuery}
-                        onChange={(e) => setAiQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            requestResearch();
+                      <div className="relative flex-1">
+                        {mentionQuery !== null && (
+                          <div className="absolute bottom-full mb-1 left-0 right-0 card shadow-elevated p-1 z-30 max-h-52 overflow-y-auto animate-pop">
+                            <div className="px-2 py-1 text-[10px] uppercase tracking-wider2 text-brand-slate">
+                              Citar fuente (restringe la investigación interna)
+                            </div>
+                            {projectSources
+                              .filter(
+                                (s) =>
+                                  !focusSources.some((f) => f.id === s.id) &&
+                                  s.title.toLowerCase().includes(mentionQuery.toLowerCase())
+                              )
+                              .slice(0, 6)
+                              .map((s) => (
+                                <button
+                                  key={s.id}
+                                  className="w-full text-left px-2 py-1.5 rounded text-xs text-brand-graphite hover:bg-brand-bg flex items-center gap-1.5"
+                                  onClick={() => {
+                                    setFocusSources((prev) => [...prev, s]);
+                                    setAiQuery((q) => q.replace(/@[^@]*$/, "").trimEnd() + " ");
+                                    setMentionQuery(null);
+                                  }}
+                                >
+                                  📚 <span className="truncate">{s.title}</span>
+                                </button>
+                              ))}
+                            {projectSources.filter(
+                              (s) =>
+                                !focusSources.some((f) => f.id === s.id) &&
+                                s.title.toLowerCase().includes(mentionQuery.toLowerCase())
+                            ).length === 0 && (
+                              <div className="px-2 py-1.5 text-xs text-brand-slate">
+                                Sin fuentes que coincidan
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <textarea
+                          className="input !py-2 text-[13px] resize-none w-full"
+                          rows={2}
+                          placeholder={
+                            thread.length
+                              ? "Continuá: «profundizá en Paraguay», «creame un gráfico…», «verificá esa cifra»… Usá @ para citar una fuente"
+                              : "¿Qué investigamos? Usá @ para citar una fuente específica del proyecto"
                           }
-                        }}
-                        disabled={aiLoading}
-                      />
+                          value={aiQuery}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setAiQuery(value);
+                            const m = value.match(/(?:^|\s)@([^@\n]*)$/);
+                            setMentionQuery(m ? m[1] : null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setMentionQuery(null);
+                            if (e.key === "Enter" && !e.shiftKey && mentionQuery === null) {
+                              e.preventDefault();
+                              requestResearch();
+                            }
+                          }}
+                          disabled={aiLoading}
+                        />
+                      </div>
                       <button
                         className="btn-primary !py-2.5"
                         disabled={aiLoading || !aiQuery.trim()}

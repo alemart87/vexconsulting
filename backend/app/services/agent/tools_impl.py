@@ -20,8 +20,19 @@ async def buscar_fuentes_impl(ctx: AgentContext, consulta: str, cantidad: int = 
     if not ctx.project_id:
         return {"error": "Sin proyecto activo"}
     cantidad = max(1, min(int(cantidad or 8), 15))
+    focus = set(ctx.focus_source_ids or [])
     async with session_scope() as db:
-        results = await search_chunks(db, ctx.project_id, consulta, k=cantidad)
+        # Con @fuentes: buscar más ancho y quedarse solo con las fuentes citadas
+        results = await search_chunks(
+            db, ctx.project_id, consulta, k=cantidad * 4 if focus else cantidad
+        )
+    if focus:
+        results = [r for r in results if r.get("source_id") in focus][:cantidad]
+        if not results:
+            return {
+                "sin_datos": True,
+                "mensaje": "Las fuentes citadas con @ no contienen fragmentos afines a esta consulta.",
+            }
     if not results:
         return {"sin_datos": True, "mensaje": "Ninguna fuente del proyecto matchea la consulta."}
     return {

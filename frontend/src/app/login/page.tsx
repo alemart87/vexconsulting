@@ -4,6 +4,22 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch, setSession } from "@/lib/api";
 
+/** Fuentes de referencia que respaldan nuestras investigaciones (logo por dominio). */
+const FUENTES_LOGIN = [
+  { name: "Deloitte", domain: "deloitte.com" },
+  { name: "PwC", domain: "pwc.com" },
+  { name: "McKinsey & Company", domain: "mckinsey.com" },
+  { name: "Gartner", domain: "gartner.com" },
+  { name: "Forrester", domain: "forrester.com" },
+  { name: "Everest Group", domain: "everestgrp.com" },
+  { name: "Frost & Sullivan", domain: "frost.com" },
+  { name: "Nasscom", domain: "nasscom.in" },
+  { name: "CEPAL", domain: "cepal.org" },
+  { name: "Banco Mundial", domain: "worldbank.org" },
+  { name: "FMI", domain: "imf.org" },
+  { name: "OCDE", domain: "oecd.org" },
+];
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -125,6 +141,32 @@ export default function LoginPage() {
               {loading ? "Ingresando…" : "Ingresar"}
             </button>
           </form>
+
+          {/* Fuentes de clase mundial */}
+          <div className="mt-10">
+            <p className="text-center text-[10px] uppercase tracking-wider2 text-brand-slate mb-3">
+              Investigamos con fuentes de clase mundial
+            </p>
+            <div className="flex flex-wrap justify-center gap-x-4 gap-y-2.5">
+              {FUENTES_LOGIN.map((f) => (
+                <span
+                  key={f.domain}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-brand-graphite/80"
+                  title={f.name}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${f.domain}&sz=64`}
+                    alt=""
+                    loading="lazy"
+                    className="h-4 w-4 rounded-sm"
+                    onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+                  />
+                  {f.name}
+                </span>
+              ))}
+            </div>
+          </div>
 
           <p className="mt-8 text-center text-xs text-brand-slate">
             © {new Date().getFullYear()} Voicenter S.A.

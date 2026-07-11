@@ -9,11 +9,18 @@ from ...core.database import get_db
 from ...models.audit import AuditLog
 from ...models.conversation import Conversation, Message
 from ...models.document_version import DocumentVersion
+from ...models.evaluation import Evaluation
 from ...models.note import Note
 from ...models.project import Project
 from ...models.source import Source
 from ...models.user import User
-from ..deps import CurrentUser, ProjectAccess, require_project_read, require_superadmin
+from ..deps import (
+    CurrentUser,
+    ProjectAccess,
+    require_lider,
+    require_project_read,
+    require_superadmin,
+)
 
 router = APIRouter(tags=["metrics"])
 
@@ -138,6 +145,150 @@ async def project_metrics(
         "costo_ia_usd": float(costo or 0),
         "actividad": [{"action": a, "count": int(c)} for a, c in actividad],
         "timeline": timeline,
+    }
+
+
+_USO_LABELS = {
+    "investigacion": "Investigador",
+    "acompanante": "Asistente de redacción",
+    "evaluador": "Evaluador",
+    "visualizador": "Asistente del visualizador",
+}
+
+
+@router.get("/admin/ai-costs")
+async def ai_costs(
+    days: int = 30,
+    _: CurrentUser = Depends(require_lider),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Gasto en IA para el consultor líder: total, por proveedor/modelo, por
+    tipo de uso, por usuario (quién consume más) y por proyecto."""
+    from datetime import datetime, timedelta, timezone
+
+    days = max(1, min(int(days or 30), 365))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    users = {uid: name for uid, name in await db.execute(select(User.id, User.full_name))}
+    users["superadmin"] = "Superadmin"
+    projects = {pid: name for pid, name in await db.execute(select(Project.id, Project.name))}
+
+    # --- Mensajes de agentes (investigador, asistentes, chat con IA) ---
+    by_use: dict[str, dict] = {}
+    by_user: dict[str, dict] = {}
+    by_project: dict[str, float] = {}
+    rows = await db.execute(
+        select(
+            Conversation.agent_type, Conversation.user_id, Conversation.project_id,
+            func.count(Message.id), func.coalesce(func.sum(Message.cost_usd), 0),
+        )
+        .join(Message, Message.conversation_id == Conversation.id)
+        .where(Message.created_at >= since, Message.cost_usd.isnot(None))
+        .group_by(Conversation.agent_type, Conversation.user_id, Conversation.project_id)
+    )
+    messages_total = 0.0
+    for agent_type, user_id, project_id, count, usd in rows:
+        usd = float(usd or 0)
+        messages_total += usd
+        uso = _USO_LABELS.get(agent_type, agent_type or "otro")
+        by_use.setdefault(uso, {"usd": 0.0, "consultas": 0})
+        by_use[uso]["usd"] += usd
+        by_use[uso]["consultas"] += int(count or 0)
+        uname = users.get(user_id, user_id or "—")
+        by_user.setdefault(uname, {"usd": 0.0, "consultas": 0})
+        by_user[uname]["usd"] += usd
+        by_user[uname]["consultas"] += int(count or 0)
+        if project_id:
+            pname = projects.get(project_id, project_id)
+            by_project[pname] = by_project.get(pname, 0.0) + usd
+
+    # --- Desglose por proveedor y modelo (tool_calls de investigaciones) ---
+    by_provider = {"openai": 0.0, "perplexity": 0.0, "embeddings": 0.0}
+    by_model: dict[str, float] = {}
+    detail_rows = await db.execute(
+        select(Message.tool_calls, Message.cost_usd)
+        .where(
+            Message.created_at >= since,
+            Message.cost_usd.isnot(None),
+            Message.tool_calls.isnot(None),
+        )
+        .limit(4000)
+    )
+    detailed = 0.0
+    for tool_calls, usd in detail_rows:
+        tc = tool_calls if isinstance(tool_calls, dict) else {}
+        o, p = tc.get("cost_openai"), tc.get("cost_perplexity")
+        if o is None and p is None:
+            continue
+        detailed += float(usd or 0)
+        by_provider["openai"] += float(o or 0)
+        by_provider["perplexity"] += float(p or 0)
+        model = tc.get("model") or "gpt (sin registrar)"
+        by_model[model] = by_model.get(model, 0.0) + float(o or 0)
+        if p:
+            by_model["perplexity/sonar"] = by_model.get("perplexity/sonar", 0.0) + float(p)
+    # Mensajes sin desglose (histórico/asistentes): asignados a OpenAI
+    by_provider["openai"] += max(0.0, messages_total - detailed)
+
+    # --- Evaluaciones ---
+    eval_row = (await db.execute(
+        select(func.count(Evaluation.id), func.coalesce(func.sum(Evaluation.cost_usd), 0))
+        .where(Evaluation.created_at >= since, Evaluation.cost_usd.isnot(None))
+    )).first()
+    eval_count, eval_usd = int(eval_row[0] or 0), float(eval_row[1] or 0)
+    if eval_usd:
+        by_use.setdefault("Evaluador", {"usd": 0.0, "consultas": 0})
+        by_use["Evaluador"]["usd"] += eval_usd
+        by_use["Evaluador"]["consultas"] += eval_count
+        by_provider["openai"] += eval_usd
+
+    # --- Edición final APA (auditoría) ---
+    final_edit_usd = 0.0
+    audit_rows = await db.execute(
+        select(AuditLog.detail, AuditLog.user_email)
+        .where(AuditLog.action == "document.final_edit", AuditLog.created_at >= since)
+        .limit(500)
+    )
+    for detail, _email in audit_rows:
+        d = detail if isinstance(detail, dict) else {}
+        final_edit_usd += float(d.get("cost_usd") or 0)
+    if final_edit_usd:
+        by_use.setdefault("Edición final APA", {"usd": 0.0, "consultas": 0})
+        by_use["Edición final APA"]["usd"] += final_edit_usd
+        by_provider["openai"] += final_edit_usd
+
+    # --- Embeddings (indexación de fuentes) ---
+    emb = float((await db.execute(
+        select(func.coalesce(func.sum(Source.embedding_cost_usd), 0))
+        .where(Source.created_at >= since)
+    )).scalar_one() or 0)
+    by_provider["embeddings"] = emb
+    if emb:
+        by_use.setdefault("Indexación de fuentes (embeddings)", {"usd": 0.0, "consultas": 0})
+        by_use["Indexación de fuentes (embeddings)"]["usd"] += emb
+
+    total = messages_total + eval_usd + final_edit_usd + emb
+    r6 = lambda x: round(float(x), 4)  # noqa: E731
+    return {
+        "days": days,
+        "total_usd": r6(total),
+        "by_provider": {k: r6(v) for k, v in by_provider.items()},
+        "by_model": sorted(
+            [{"model": m, "usd": r6(v)} for m, v in by_model.items()],
+            key=lambda x: -x["usd"],
+        ),
+        "by_use": sorted(
+            [{"uso": k, "usd": r6(v["usd"]), "consultas": v["consultas"]} for k, v in by_use.items()],
+            key=lambda x: -x["usd"],
+        ),
+        "by_user": sorted(
+            [{"usuario": k, "usd": r6(v["usd"]), "consultas": v["consultas"]} for k, v in by_user.items()],
+            key=lambda x: -x["usd"],
+        ),
+        "by_project": sorted(
+            [{"proyecto": k, "usd": r6(v)} for k, v in by_project.items()],
+            key=lambda x: -x["usd"],
+        )[:20],
     }
 
 
