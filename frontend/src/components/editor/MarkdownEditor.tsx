@@ -80,6 +80,46 @@ export default function MarkdownEditor({
   const [linkUrl, setLinkUrl] = useState("");
   const statsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Foco real del editor: los estados activos (H1, lista, enlace…) solo se
+  // muestran con el cursor adentro — si no, quedan «prendidos» tras el blur.
+  const [focused, setFocused] = useState(false);
+
+  // Preferencias de lectura/escritura (Aa): fuente, tamaño e interlineado.
+  // Solo afectan la vista del editor — el export mantiene el estilo de marca.
+  interface Prefs {
+    font: "sans" | "serif" | "mono";
+    size: number;
+    leading: number;
+  }
+  const DEFAULT_PREFS: Prefs = { font: "sans", size: 15, leading: 1.65 };
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("vex_editor_prefs");
+      if (raw) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(raw) });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const updatePrefs = (patch: Partial<Prefs>) => {
+    setPrefs((p) => {
+      const next = { ...p, ...patch };
+      try {
+        localStorage.setItem("vex_editor_prefs", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+  const FONT_FAMILIES: Record<Prefs["font"], string> = {
+    sans: '"Manrope", system-ui, sans-serif',
+    serif: 'Georgia, "Times New Roman", serif',
+    mono: '"Cascadia Code", Consolas, monospace',
+  };
+  const prefsCustom =
+    prefs.font !== DEFAULT_PREFS.font ||
+    prefs.size !== DEFAULT_PREFS.size ||
+    prefs.leading !== DEFAULT_PREFS.leading;
+
   const emitStats = useCallback(
     (ed: any) => {
       if (!onStats) return;
@@ -157,6 +197,18 @@ export default function MarkdownEditor({
     editor?.setEditable(editable, false);
   }, [editable, editor]);
 
+  useEffect(() => {
+    if (!editor) return;
+    const onFocus = () => setFocused(true);
+    const onBlur = () => setFocused(false);
+    editor.on("focus", onFocus);
+    editor.on("blur", onBlur);
+    return () => {
+      editor.off("focus", onFocus);
+      editor.off("blur", onBlur);
+    };
+  }, [editor]);
+
   const uploadImage = useCallback(
     async (file: File) => {
       setUploading(true);
@@ -208,27 +260,27 @@ export default function MarkdownEditor({
           <ToolbarButton title="Rehacer (Ctrl+Y)" disabled={!editor.can().redo()}
             onClick={() => editor.chain().focus().redo().run()}>↷</ToolbarButton>
           <span className="w-px h-5 bg-brand-border mx-1" />
-          <ToolbarButton title="Título 1 (Ctrl+Alt+1)" active={editor.isActive("heading", { level: 1 })}
+          <ToolbarButton title="Título 1 (Ctrl+Alt+1)" active={focused && editor.isActive("heading", { level: 1 })}
             onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>H1</ToolbarButton>
-          <ToolbarButton title="Título 2 (Ctrl+Alt+2)" active={editor.isActive("heading", { level: 2 })}
+          <ToolbarButton title="Título 2 (Ctrl+Alt+2)" active={focused && editor.isActive("heading", { level: 2 })}
             onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</ToolbarButton>
-          <ToolbarButton title="Título 3 (Ctrl+Alt+3)" active={editor.isActive("heading", { level: 3 })}
+          <ToolbarButton title="Título 3 (Ctrl+Alt+3)" active={focused && editor.isActive("heading", { level: 3 })}
             onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</ToolbarButton>
           <span className="w-px h-5 bg-brand-border mx-1" />
-          <ToolbarButton title="Negrita (Ctrl+B)" active={editor.isActive("bold")}
+          <ToolbarButton title="Negrita (Ctrl+B)" active={focused && editor.isActive("bold")}
             onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></ToolbarButton>
-          <ToolbarButton title="Cursiva (Ctrl+I)" active={editor.isActive("italic")}
+          <ToolbarButton title="Cursiva (Ctrl+I)" active={focused && editor.isActive("italic")}
             onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></ToolbarButton>
-          <ToolbarButton title="Tachado (Ctrl+Shift+S)" active={editor.isActive("strike")}
+          <ToolbarButton title="Tachado (Ctrl+Shift+S)" active={focused && editor.isActive("strike")}
             onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></ToolbarButton>
-          <ToolbarButton title="Código (Ctrl+E)" active={editor.isActive("code")}
+          <ToolbarButton title="Código (Ctrl+E)" active={focused && editor.isActive("code")}
             onClick={() => editor.chain().focus().toggleCode().run()}>{"</>"}</ToolbarButton>
           <span className="w-px h-5 bg-brand-border mx-1" />
-          <ToolbarButton title="Lista (Ctrl+Shift+8)" active={editor.isActive("bulletList")}
+          <ToolbarButton title="Lista (Ctrl+Shift+8)" active={focused && editor.isActive("bulletList")}
             onClick={() => editor.chain().focus().toggleBulletList().run()}>•</ToolbarButton>
-          <ToolbarButton title="Lista numerada (Ctrl+Shift+7)" active={editor.isActive("orderedList")}
+          <ToolbarButton title="Lista numerada (Ctrl+Shift+7)" active={focused && editor.isActive("orderedList")}
             onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</ToolbarButton>
-          <ToolbarButton title="Cita (Ctrl+Shift+B)" active={editor.isActive("blockquote")}
+          <ToolbarButton title="Cita (Ctrl+Shift+B)" active={focused && editor.isActive("blockquote")}
             onClick={() => editor.chain().focus().toggleBlockquote().run()}>❝</ToolbarButton>
           <ToolbarButton title="Separador horizontal"
             onClick={() => editor.chain().focus().setHorizontalRule().run()}>―</ToolbarButton>
@@ -238,11 +290,19 @@ export default function MarkdownEditor({
           <ToolbarButton title="Insertar imagen" onClick={() => fileInput.current?.click()}>
             {uploading ? "…" : "🖼"}
           </ToolbarButton>
-          <ToolbarButton title="Enlace (Ctrl+K)" active={editor.isActive("link")} onClick={openLink}>
+          <ToolbarButton title="Enlace (Ctrl+K)" active={focused && editor.isActive("link")} onClick={openLink}>
             🔗
           </ToolbarButton>
           <ToolbarButton title="Limpiar formato"
             onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()}>⌫</ToolbarButton>
+          <span className="w-px h-5 bg-brand-border mx-1" />
+          <ToolbarButton
+            title="Tipografía: fuente, tamaño e interlineado (solo cambia tu vista del editor)"
+            active={prefsOpen || prefsCustom}
+            onClick={() => setPrefsOpen((v) => !v)}
+          >
+            Aa
+          </ToolbarButton>
           {onRequestAi && (
             <>
               <span className="w-px h-5 bg-brand-border mx-1" />
@@ -281,6 +341,91 @@ export default function MarkdownEditor({
               e.currentTarget.value = "";
             }}
           />
+          {/* Popover de tipografía (Aa): preferencias de vista, sin ocupar la barra */}
+          {prefsOpen && (
+            <div className="absolute top-full right-2 mt-1 w-72 glass rounded-xl p-3 z-30 animate-pop space-y-2.5">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider2 text-brand-slate mb-1">
+                  Fuente
+                </div>
+                <div className="flex rounded-md border border-brand-border overflow-hidden bg-white/60">
+                  {([
+                    ["sans", "Manrope"],
+                    ["serif", "Serif"],
+                    ["mono", "Mono"],
+                  ] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`flex-1 px-2 py-1.5 text-xs font-semibold transition-colors ${
+                        prefs.font === v ? "bg-brand-ink text-white" : "text-brand-graphite hover:bg-white"
+                      }`}
+                      style={{ fontFamily: FONT_FAMILIES[v] }}
+                      onClick={() => updatePrefs({ font: v })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider2 text-brand-slate mb-1">
+                  Tamaño de letra
+                </div>
+                <div className="flex rounded-md border border-brand-border overflow-hidden bg-white/60">
+                  {[13, 15, 17, 19].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`flex-1 px-2 py-1.5 text-xs font-semibold transition-colors ${
+                        prefs.size === s ? "bg-brand-ink text-white" : "text-brand-graphite hover:bg-white"
+                      }`}
+                      onClick={() => updatePrefs({ size: s })}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider2 text-brand-slate mb-1">
+                  Interlineado
+                </div>
+                <div className="flex rounded-md border border-brand-border overflow-hidden bg-white/60">
+                  {([
+                    [1.45, "Compacto"],
+                    [1.65, "Normal"],
+                    [1.9, "Amplio"],
+                    [2.2, "Doble"],
+                  ] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`flex-1 px-1.5 py-1.5 text-[11px] font-semibold transition-colors ${
+                        prefs.leading === v ? "bg-brand-ink text-white" : "text-brand-graphite hover:bg-white"
+                      }`}
+                      onClick={() => updatePrefs({ leading: v })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-0.5">
+                <span className="text-[10px] text-brand-mist">
+                  Solo cambia tu vista — el export mantiene el estilo corporativo.
+                </span>
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-brand-primary hover:underline shrink-0 ml-2"
+                  onClick={() => updatePrefs(DEFAULT_PREFS)}
+                >
+                  Restablecer
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Popover de enlace (reemplaza el prompt nativo) */}
           {linkOpen && (
             <div className="absolute top-full left-2 right-2 sm:left-auto sm:right-auto sm:w-80 mt-1 glass rounded-xl p-2 z-30 animate-pop flex gap-1.5">
@@ -309,6 +454,15 @@ export default function MarkdownEditor({
         className={`prose-vex tiptap min-h-[60vh] ${
           zen ? "px-8 sm:px-12 py-8 prose-zen" : "px-6 py-5"
         }`}
+        style={
+          prefsCustom
+            ? {
+                fontFamily: FONT_FAMILIES[prefs.font],
+                fontSize: `${prefs.size}px`,
+                lineHeight: prefs.leading,
+              }
+            : undefined
+        }
       />
     </div>
   );
