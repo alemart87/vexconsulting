@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
 import AgentChat, { Proposal } from "@/components/agent/AgentChat";
 import GuidedTour, { TourStep } from "@/components/GuidedTour";
 import MarkdownEditor, { EditorHandle } from "@/components/editor/MarkdownEditor";
-import { apiFetch, formatDate, getUser } from "@/lib/api";
+import { apiFetch, formatDate, getUser, parseApiDate } from "@/lib/api";
 import { useProject } from "@/components/ProjectContext";
 
 interface Doc {
@@ -750,7 +750,7 @@ export default function DocumentPage() {
                       {convList.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.title || "Investigación"} ·{" "}
-                          {new Date(c.updated_at).toLocaleDateString("es-PY", {
+                          {parseApiDate(c.updated_at).toLocaleDateString("es-PY", {
                             day: "2-digit",
                             month: "2-digit",
                           })}

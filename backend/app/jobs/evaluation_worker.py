@@ -101,15 +101,22 @@ async def _process(ev_id: str) -> None:
             user_id=requested_by, user_name="evaluador", project_id=project_id,
             agent_type="evaluador",
         )
-        final: dict = {}
-        async for ev in stream_agent(
-            [{"role": "user", "content": "Evaluá el proyecto según tu proceso obligatorio."}],
-            context, agent,
-        ):
-            if ev["type"] == "done":
-                final = ev
+        async def _run() -> dict:
+            final: dict = {}
+            async for ev in stream_agent(
+                [{"role": "user", "content": "Evaluá el proyecto según tu proceso obligatorio."}],
+                context, agent,
+            ):
+                if ev["type"] == "done":
+                    final = ev
+            return final
+
+        # Tope duro: una evaluación nunca queda «corriendo» para siempre
+        final = await asyncio.wait_for(_run(), timeout=20 * 60)
         parsed = _parse_json(final.get("content", ""))
         usage = final.get("usage", {}) or {}
+    except asyncio.TimeoutError:
+        error = "La evaluación superó los 20 minutos y se canceló. Reintentá."
     except AgentNotConfigured as exc:
         error = str(exc)
     except Exception as exc:
@@ -133,6 +140,30 @@ async def _process(ev_id: str) -> None:
                 usage.get("cached_tokens", 0),
             )
         evaluation.finished_at = datetime.now(timezone.utc)
+
+        # Campana: avisar a quien la pidió que el informe está listo
+        try:
+            from ..services.notification_service import notify
+
+            link = f"/projects/{project_id}/evaluations?open={ev_id}"
+            if error:
+                title = f"La evaluación de «{project_name}» falló"
+                body = error[:200]
+            else:
+                score = parsed.get("overall_score")
+                title = (
+                    f"Evaluación lista: {score}/10 · {project_name}"
+                    if score is not None else f"Evaluación lista · {project_name}"
+                )
+                body = "El informe del evaluador experto está disponible."
+            await notify(
+                db, recipients={requested_by}, project_id=project_id,
+                kind="evaluacion", title=title, body=body, link=link, entity_id=ev_id,
+                actor_name="Evaluador experto",
+            )
+        except Exception:  # pragma: no cover — la campana nunca tumba el job
+            logger.warning("No se pudo notificar la evaluación %s", ev_id[:8])
+
         await db.commit()
     logger.info("Evaluación %s: %s", ev_id[:8], error or "OK")
 

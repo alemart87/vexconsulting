@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { apiFetch, getUser } from "@/lib/api";
+import { apiFetch, getUser, parseApiDate } from "@/lib/api";
 
 interface Channel {
   id: string;
@@ -59,10 +59,10 @@ const MENTION_RE = /(@[\wÁÉÍÓÚáéíóúÑñ📝][^\s,.;:!?]*(?:\s[A-ZÁÉ�
 const QUICK_REACTIONS = ["👍", "✅", "❤️", "😂", "👀", "🔥"];
 
 const minutesBetween = (a?: string, b?: string) =>
-  a && b ? Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 60000 : Infinity;
+  a && b ? Math.abs(parseApiDate(a).getTime() - parseApiDate(b).getTime()) / 60000 : Infinity;
 
 const hhmm = (iso: string) =>
-  new Date(iso).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" });
+  parseApiDate(iso).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" });
 
 /** Huella de la lista para no re-renderizar (ni re-scrollear) si nada cambió. */
 const fingerprint = (list: Msg[]) =>
@@ -853,7 +853,7 @@ export default function ChatPage() {
                 <div className="text-[10px] font-bold text-brand-cyan">
                   {hit.channel_kind === "tema" ? `# ${hit.channel_name}` : `💬 ${hit.channel_name}`}
                   <span className="text-brand-mist font-normal ml-1.5">
-                    {new Date(hit.created_at).toLocaleDateString("es-PY", { day: "numeric", month: "short" })}
+                    {parseApiDate(hit.created_at).toLocaleDateString("es-PY", { day: "numeric", month: "short" })}
                   </span>
                 </div>
                 <div className="text-xs text-brand-ink">
@@ -991,14 +991,14 @@ export default function ChatPage() {
             const showNewDivider =
               !!dividerAt &&
               !mine &&
-              new Date(m.created_at) > new Date(dividerAt) &&
-              (!prev || new Date(prev.created_at) <= new Date(dividerAt) || prev.user_id === me?.id);
+              parseApiDate(m.created_at) > parseApiDate(dividerAt) &&
+              (!prev || parseApiDate(prev.created_at) <= parseApiDate(dividerAt) || prev.user_id === me?.id);
 
             return (
               <div key={m.id}>
                 {showTimeDivider && (
                   <div className="text-center text-[10px] text-brand-mist font-semibold py-1.5">
-                    {new Date(m.created_at).toLocaleDateString("es-PY", {
+                    {parseApiDate(m.created_at).toLocaleDateString("es-PY", {
                       day: "numeric", month: "short",
                     })}{" "}
                     {hhmm(m.created_at)}

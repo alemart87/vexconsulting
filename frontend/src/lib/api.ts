@@ -109,9 +109,15 @@ export async function downloadFile(path: string, filename: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+/** Fechas de la API: el backend guarda UTC; si el ISO llega sin zona horaria
+ * hay que tratarlo como UTC (parsearlo «a secas» lo corre a hora local). */
+export function parseApiDate(iso: string): Date {
+  return new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`);
+}
+
 export function formatDate(iso?: string | null): string {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = parseApiDate(iso);
   return d.toLocaleString("es-PY", {
     day: "2-digit",
     month: "2-digit",
