@@ -242,6 +242,8 @@ h3,
   .nav-link {
     @apply px-3 py-2 rounded-md text-sm font-semibold tracking-wide transition-colors;
     @apply text-brand-slate hover:bg-brand-bg hover:text-brand-ink;
+    /* Los labels del navbar NUNCA se parten en dos líneas */
+    @apply whitespace-nowrap;
   }
   .nav-link-active {
     @apply nav-link bg-brand-primary text-white hover:bg-brand-primary-dark hover:text-white;

@@ -192,9 +192,9 @@ export default function AppShell({
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-40 bg-white border-b border-brand-border shadow-soft">
-        <div className="mx-auto max-w-7xl px-4 h-16 flex items-center justify-between gap-4">
+        <div className="mx-auto max-w-7xl px-4 h-16 flex items-center justify-between gap-3">
           <Brand />
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden lg:flex items-center gap-1">
             <span data-tour="nav-proyectos">
               <NavLink href="/dashboard" label="Proyectos" />
             </span>
@@ -210,7 +210,7 @@ export default function AppShell({
             )}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => setTourOpen(true)}
               className="h-9 w-9 rounded-full bg-brand-primary/10 text-brand-primary font-bold text-base border border-brand-primary/30 hover:bg-brand-primary hover:text-white transition-colors flex items-center justify-center shrink-0"
@@ -222,11 +222,11 @@ export default function AppShell({
             <span data-tour="campana">
               <NotificationBell />
             </span>
-            <div className="hidden sm:block text-right">
-              <div className="text-sm font-semibold text-brand-ink leading-tight">
+            <div className="hidden lg:block text-right">
+              <div className="text-sm font-semibold text-brand-ink leading-tight whitespace-nowrap">
                 {user.full_name}
               </div>
-              <div className="text-[10px] uppercase tracking-wider2 text-brand-slate">
+              <div className="text-[10px] uppercase tracking-wider2 text-brand-slate whitespace-nowrap">
                 {ROLE_LABELS[user.role] ?? user.role}
               </div>
             </div>
@@ -248,11 +248,11 @@ export default function AppShell({
                 </div>
               )}
             </Link>
-            <button onClick={onLogout} className="hidden md:inline-flex btn-ghost text-xs">
+            <button onClick={onLogout} className="hidden lg:inline-flex btn-ghost text-xs">
               Salir
             </button>
             <button
-              className="md:hidden btn-ghost !px-2 text-xl leading-none"
+              className="lg:hidden btn-ghost !px-2 text-xl leading-none"
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Menú"
             >
@@ -261,7 +261,7 @@ export default function AppShell({
           </div>
         </div>
         {menuOpen && (
-          <nav className="md:hidden border-t border-brand-border px-4 py-3 flex flex-col gap-1 animate-fade">
+          <nav className="lg:hidden border-t border-brand-border px-4 py-3 flex flex-col gap-1 animate-fade">
             <div className="pb-2 mb-1 border-b border-brand-border">
               <div className="text-sm font-semibold text-brand-ink">{user.full_name}</div>
               <div className="text-[10px] uppercase tracking-wider2 text-brand-slate">
