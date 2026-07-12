@@ -131,10 +131,22 @@ export default function ProjectOverview() {
             <ul className="divide-y divide-brand-border">
               {versions.slice(0, 5).map((v) => (
                 <li key={v.id} className="py-2.5 flex items-center justify-between text-sm">
-                  <div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {v.author_photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={v.author_photo_url}
+                        alt={v.author_name}
+                        className="h-6 w-6 rounded-full object-cover border border-brand-border shrink-0"
+                      />
+                    ) : (
+                      <span className="h-6 w-6 rounded-full bg-brand-primary/85 text-white flex items-center justify-center font-bold text-[10px] shrink-0">
+                        {(v.author_name || "?").slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
                     <span className="font-semibold text-brand-ink">v{v.version_number}</span>
                     <span className="text-brand-slate"> · {v.author_name}</span>
-                    {v.summary && <span className="text-brand-slate"> · “{v.summary}”</span>}
+                    {v.summary && <span className="text-brand-slate truncate"> · “{v.summary}”</span>}
                   </div>
                   <span className="text-xs text-brand-mist">{formatDate(v.created_at)}</span>
                 </li>

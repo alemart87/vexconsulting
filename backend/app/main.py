@@ -37,6 +37,10 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("documents", "lock_user_name", "VARCHAR(255)"),
     ("documents", "final_edit_status", "VARCHAR(20)"),
     ("documents", "final_edit_detail", "JSON"),
+    ("users", "must_change_password", "BOOLEAN DEFAULT FALSE"),
+    ("users", "totp_secret", "VARCHAR(64)"),
+    ("users", "totp_enabled", "BOOLEAN DEFAULT FALSE"),
+    ("users", "token_version", "INTEGER DEFAULT 0"),
     ("sources", "embedding_cost_usd", "FLOAT"),
     ("conversations", "role_slug", "VARCHAR(50)"),
 ]
@@ -129,10 +133,26 @@ async def _recover_stale_final_edits() -> None:
         logger.warning("No se pudieron recuperar ediciones finales: %s", exc)
 
 
+def _security_startup_checks() -> None:
+    """Fallos ruidosos ANTES de servir tráfico con configuración insegura."""
+    if settings.env == "production":
+        if not settings.secret_key or settings.secret_key == "change-me":
+            raise RuntimeError(
+                "SECRET_KEY sin configurar en producción: cualquiera podría "
+                "forjar tokens. Definí SECRET_KEY en el entorno."
+            )
+        if settings.superadmin_password:
+            logger.warning(
+                "SUPERADMIN_PASSWORD en texto plano en producción — usá "
+                "SUPERADMIN_PASSWORD_HASH (bcrypt)."
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     logger.info("VEX Consulting iniciando (env=%s)", settings.env)
+    _security_startup_checks()
     await run_migrations()
     await _recover_stale_final_edits()
     settings.upload_path  # crea el directorio
@@ -160,11 +180,20 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=[o for o in settings.cors_origins_list if o != "*"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
 
 API = "/api/v1"
 app.include_router(auth_router.router, prefix=API)

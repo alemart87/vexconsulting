@@ -84,17 +84,34 @@ export default function VersionsPage() {
               selected?.id === v.id ? "bg-brand-primary-light/40" : ""
             }`}
           >
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-sm text-brand-ink">
-                v{v.version_number}
-                {v.summary ? ` — ${v.summary}` : ""}
-              </span>
-              <span className="text-xs text-brand-mist">{formatDate(v.created_at)}</span>
-            </div>
-            <div className="text-xs text-brand-slate mt-0.5">
-              {v.author_name} · {v.word_count.toLocaleString("es-PY")} palabras
-              <span className="text-emerald-700"> +{v.words_added}</span>
-              <span className="text-red-600"> −{v.words_removed}</span>
+            <div className="flex items-start gap-2.5">
+              {/* Foto del autor de la revisión */}
+              {v.author_photo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={v.author_photo_url}
+                  alt={v.author_name}
+                  className="h-8 w-8 rounded-full object-cover border border-brand-border shrink-0 mt-0.5"
+                />
+              ) : (
+                <div className="h-8 w-8 rounded-full bg-brand-primary/85 text-white flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  {(v.author_name || "?").slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-sm text-brand-ink truncate">
+                    v{v.version_number}
+                    {v.summary ? ` — ${v.summary}` : ""}
+                  </span>
+                  <span className="text-xs text-brand-mist shrink-0">{formatDate(v.created_at)}</span>
+                </div>
+                <div className="text-xs text-brand-slate mt-0.5">
+                  {v.author_name} · {v.word_count.toLocaleString("es-PY")} palabras
+                  <span className="text-emerald-700"> +{v.words_added}</span>
+                  <span className="text-red-600"> −{v.words_removed}</span>
+                </div>
+              </div>
             </div>
           </button>
         ))}

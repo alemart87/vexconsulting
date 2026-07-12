@@ -25,6 +25,16 @@ interface Mentionable {
   notes: { id: string; title: string; status: string }[];
 }
 
+/** Emojis frecuentes para el chat de trabajo (sin dependencias). */
+const EMOJIS = [
+  "😀", "😄", "😅", "😂", "🙂", "😉", "😍", "🤔", "😎", "🥳",
+  "😢", "😮", "😴", "🤯", "🙄", "😬", "🤝", "👍", "👎", "👏",
+  "🙌", "💪", "🙏", "👌", "✌️", "🤞", "👀", "🧠", "❤️", "🔥",
+  "⭐", "✨", "🎉", "🎯", "🚀", "💡", "📈", "📉", "📊", "📌",
+  "📎", "🗂️", "📅", "⏰", "☕", "✅", "❌", "⚠️", "❓", "❗",
+  "💬", "📣", "🔍", "🧪", "💰", "🏆", "🤖", "🎧", "🧉", "🇵🇾",
+];
+
 function renderContent(content: string) {
   // Resalta tokens @Nombre y @📝Nota
   const parts = content.split(/(@[\wÁÉÍÓÚáéíóúÑñ📝][^\s,.;:!?]*(?:\s[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúÑñ]*)?)/g);
@@ -53,6 +63,24 @@ export default function ChatPage() {
   const [showNewDm, setShowNewDm] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const msgScrollRef = useRef<HTMLDivElement>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const insertEmoji = (emoji: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setText((t) => t + emoji);
+      return;
+    }
+    const start = ta.selectionStart ?? text.length;
+    const end = ta.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + emoji + text.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
+  };
   const lastAtRef = useRef<string | null>(null);
   const activeRef = useRef<Channel | null>(null);
   activeRef.current = active;
@@ -338,8 +366,38 @@ export default function ChatPage() {
               ))}
             </div>
           )}
+          {emojiOpen && (
+            <div className="absolute bottom-full left-3 mb-1 card shadow-elevated p-2 z-20 animate-pop w-72">
+              <div className="grid grid-cols-10 gap-0.5">
+                {EMOJIS.map((e) => (
+                  <button
+                    key={e}
+                    className="h-7 w-7 rounded hover:bg-brand-bg text-lg leading-none"
+                    onClick={() => {
+                      insertEmoji(e);
+                      setEmojiOpen(false);
+                    }}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex gap-2">
+            <button
+              className={`self-end h-10 w-10 shrink-0 rounded-md border text-xl leading-none transition-colors ${
+                emojiOpen
+                  ? "border-brand-primary bg-brand-primary-light"
+                  : "border-brand-border bg-white hover:border-brand-primary"
+              }`}
+              title="Emojis"
+              onClick={() => setEmojiOpen((v) => !v)}
+            >
+              😊
+            </button>
             <textarea
+              ref={textareaRef}
               className="input flex-1 !py-2 resize-none"
               rows={2}
               placeholder={`Mensaje ${active ? (active.kind === "tema" ? `a #${active.name}` : `para ${active.name}`) : ""}… usá @ para mencionar`}

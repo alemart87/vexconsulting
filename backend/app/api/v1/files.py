@@ -49,6 +49,19 @@ async def upload_image(
     return {"url": f"/api/v1/projects/{project_id}/images/{name}"}
 
 
+@router.get("/avatars/{name}")
+async def get_avatar(name: str) -> FileResponse:
+    """Foto de perfil como URL-capacidad (nombre uuid impredecible)."""
+    import re
+
+    if not re.fullmatch(r"[a-f0-9]{32}\.(png|jpg|webp)", name):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nombre inválido")
+    target = settings.upload_path / "avatars" / name
+    if not target.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Avatar no encontrado")
+    return FileResponse(target, headers={"Cache-Control": "private, max-age=86400"})
+
+
 @router.get("/projects/{project_id}/images/{name}")
 async def get_image(project_id: str, name: str) -> FileResponse:
     """Sirve la imagen SIN header de autenticación (una etiqueta <img> no puede

@@ -24,7 +24,9 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(subject: str, role: str, expires_minutes: int | None = None) -> str:
+def create_access_token(
+    subject: str, role: str, expires_minutes: int | None = None, token_version: int = 0
+) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=expires_minutes or settings.jwt_access_expire_minutes
     )
@@ -33,13 +35,21 @@ def create_access_token(subject: str, role: str, expires_minutes: int | None = N
         "role": role,
         "exp": expire,
         "type": "access",
+        "ver": token_version,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(subject: str) -> str:
+def create_refresh_token(subject: str, token_version: int = 0) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_expire_days)
-    payload = {"sub": subject, "exp": expire, "type": "refresh"}
+    payload = {"sub": subject, "exp": expire, "type": "refresh", "ver": token_version}
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+
+
+def create_2fa_token(subject: str) -> str:
+    """Token intermedio del login en dos pasos (solo sirve para /auth/2fa)."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=5)
+    payload = {"sub": subject, "exp": expire, "type": "2fa"}
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 

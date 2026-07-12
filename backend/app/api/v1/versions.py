@@ -15,19 +15,34 @@ from ..deps import ProjectAccess, client_ip, require_project_admin, require_proj
 router = APIRouter(prefix="/projects/{project_id}/versions", tags=["versions"])
 
 
-@router.get("", response_model=list[VersionOut])
+@router.get("")
 async def list_versions(
     project_id: str,
     access: ProjectAccess = Depends(require_project_read),
     db: AsyncSession = Depends(get_db),
-) -> list[VersionOut]:
+) -> list[dict]:
+    from ...models.user import User
+
     result = await db.execute(
         select(DocumentVersion)
         .where(DocumentVersion.project_id == project_id)
         .order_by(DocumentVersion.version_number.desc())
         .limit(200)
     )
-    return [VersionOut.model_validate(v) for v in result.scalars().all()]
+    versions = result.scalars().all()
+    # Foto de perfil del autor de cada revisión
+    photos = {
+        uid: url
+        for uid, url in await db.execute(select(User.id, User.photo_url))
+        if url
+    }
+    return [
+        {
+            **VersionOut.model_validate(v).model_dump(),
+            "author_photo_url": photos.get(v.author_id),
+        }
+        for v in versions
+    ]
 
 
 @router.get("/{version_id}", response_model=VersionDetail)

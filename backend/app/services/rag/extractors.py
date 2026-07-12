@@ -352,16 +352,50 @@ def extract_xlsx(path: str, max_rows: int = 200000) -> list[Section]:
     return sections
 
 
+def _assert_public_http_url(url: str) -> None:
+    """Anti-SSRF: solo http(s) hacia hosts PÚBLICOS.
+
+    Rechaza loopback, redes privadas, link-local (incluida la metadata de
+    nube 169.254.169.254) y reservadas, resolviendo el hostname."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("URL inválida: solo se admiten http/https")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except OSError as exc:
+        raise ValueError(f"No se pudo resolver el host: {parsed.hostname}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise ValueError("La URL apunta a una red interna: no permitida")
+
+
 def extract_link(url: str) -> tuple[list[Section], str]:
-    """Descarga la página y extrae el contenido principal con trafilatura."""
+    """Descarga la página y extrae el contenido principal con trafilatura.
+
+    Los redirects se siguen manualmente re-validando cada salto (un redirect
+    hacia una IP interna no puede saltarse el control anti-SSRF)."""
     import httpx
 
-    resp = httpx.get(
-        url,
-        follow_redirects=True,
-        timeout=45,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; VEXConsulting/1.0)"},
-    )
+    current = url
+    resp = None
+    for _ in range(4):  # hasta 3 redirects
+        _assert_public_http_url(current)
+        resp = httpx.get(
+            current,
+            follow_redirects=False,
+            timeout=45,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; VEXConsulting/1.0)"},
+        )
+        if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("location"):
+            current = str(resp.next_request.url) if resp.next_request else resp.headers["location"]
+            continue
+        break
     resp.raise_for_status()
     html = resp.text
 

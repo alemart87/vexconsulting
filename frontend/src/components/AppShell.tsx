@@ -229,9 +229,24 @@ export default function AppShell({
                 {ROLE_LABELS[user.role] ?? user.role}
               </div>
             </div>
-            <div className="h-9 w-9 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm">
-              {user.full_name?.slice(0, 1).toUpperCase()}
-            </div>
+            <Link
+              href="/perfil"
+              title="Mi perfil: foto, contraseña y doble autenticación"
+              className="shrink-0"
+            >
+              {user.photo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.photo_url}
+                  alt="Perfil"
+                  className="h-9 w-9 rounded-full object-cover border-2 border-brand-border hover:border-brand-primary transition-colors"
+                />
+              ) : (
+                <div className="h-9 w-9 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm hover:opacity-85">
+                  {user.full_name?.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+            </Link>
             <button onClick={onLogout} className="hidden md:inline-flex btn-ghost text-xs">
               Salir
             </button>

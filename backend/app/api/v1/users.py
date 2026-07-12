@@ -5,18 +5,55 @@ consultor_lider crea consultores y visualizadores (no líderes).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import uuid as _uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.config import settings
 from ...core.database import get_db
 from ...core.security import hash_password
 from ...models.user import User
 from ...schemas.user import UserCreate, UserOut, UserUpdate
 from ...services.audit_service import log_action
-from ..deps import CurrentUser, client_ip, require_lider
+from ..deps import CurrentUser, client_ip, get_current_user, require_lider
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+_AVATAR_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+
+
+@router.post("/me/photo")
+async def upload_my_photo(
+    file: UploadFile,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Foto de perfil: se guarda con nombre impredecible y se sirve como
+    URL-capacidad (los <img> no envían el JWT)."""
+    if user.is_superadmin:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El superadmin no tiene perfil en DB")
+    if file.content_type not in _AVATAR_TYPES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Solo PNG, JPG o WebP")
+    data = await file.read()
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Máximo 2 MB")
+
+    avatars = settings.upload_path / "avatars"
+    avatars.mkdir(parents=True, exist_ok=True)
+    target = await db.get(User, user.id)
+    # borrar la anterior para no acumular
+    if target.photo_url:
+        old = avatars / Path(target.photo_url).name
+        if old.parent == avatars:
+            old.unlink(missing_ok=True)
+    name = f"{_uuid.uuid4().hex}{_AVATAR_TYPES[file.content_type]}"
+    (avatars / name).write_bytes(data)
+    target.photo_url = f"/api/v1/avatars/{name}"
+    await log_action(db, user_id=user.id, user_email=user.email, action="user.photo")
+    return {"photo_url": target.photo_url}
 
 
 def _can_manage_role(actor: CurrentUser, target_role: str) -> bool:
@@ -55,6 +92,9 @@ async def create_user(
     existing = await db.execute(select(User).where(User.email == email))
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Ya existe un usuario con ese email")
+    from .auth import _check_password_strength
+
+    _check_password_strength(payload.password)
 
     user = User(
         email=email,
@@ -62,6 +102,9 @@ async def create_user(
         full_name=payload.full_name.strip(),
         role=payload.role,
         created_by=actor.id,
+        # Seguridad: la contraseña la eligió otro (líder/superadmin) — el
+        # sistema exige cambiarla en el primer ingreso.
+        must_change_password=True,
     )
     db.add(user)
     await db.flush()
@@ -101,7 +144,12 @@ async def update_user(
         user.is_active = payload.is_active
         changes["is_active"] = payload.is_active
     if payload.password:
+        from .auth import _check_password_strength
+
+        _check_password_strength(payload.password)
         user.hashed_password = hash_password(payload.password)
+        user.must_change_password = True  # reset por un admin → cambio obligatorio
+        user.token_version = (user.token_version or 0) + 1  # invalida sesiones activas
         changes["password"] = "changed"
 
     await log_action(

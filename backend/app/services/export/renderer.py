@@ -280,11 +280,16 @@ def export_docx(content_md: str, title: str, author_note: str, output_path: str,
     import pypandoc
 
     md = _drop_duplicate_title(content_md, title)
-    md = re.sub(
-        r"\(/api/v1/projects/([^/)]+)/images/([^)]+)\)",
-        lambda m: f"({(Path(upload_root) / m.group(1) / 'images' / m.group(2)).as_posix()})",
-        md,
-    )
+
+    def _img_path(m: re.Match) -> str:
+        # SOLO imágenes del propio proyecto (misma validación que el PDF):
+        # sin esto, una referencia a otro project_id incrustaría archivos ajenos.
+        pid, name = m.group(1), m.group(2)
+        if pid != project_id or "/" in name or "\\" in name or ".." in name:
+            return "()"
+        return f"({(Path(upload_root) / pid / 'images' / name).as_posix()})"
+
+    md = re.sub(r"\(/api/v1/projects/([^/)]+)/images/([^)]+)\)", _img_path, md)
     pypandoc.convert_text(
         md,
         "docx",

@@ -26,6 +26,13 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), default="consultor")
     photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Seguridad: cambio de contraseña obligatorio (cuentas creadas por un
+    # líder/superadmin) y doble factor TOTP (Google Authenticator y similares)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Al cambiar la contraseña se incrementa: los tokens viejos quedan inválidos
+    token_version: Mapped[int] = mapped_column(default=0)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

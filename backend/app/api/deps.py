@@ -33,6 +33,7 @@ class CurrentUser:
     role: str
     full_name: str
     photo_url: Optional[str] = None
+    must_change_password: bool = False
 
     @property
     def is_superadmin(self) -> bool:
@@ -94,12 +95,22 @@ async def get_current_user(
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuario inválido o inactivo")
 
+    # Tokens emitidos antes de un cambio de contraseña quedan inválidos
+    if int(payload.get("ver", 0) or 0) != int(user.token_version or 0):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión expirada: volvé a ingresar")
+
+    # Cambio de contraseña obligatorio (cuenta creada por un líder/superadmin):
+    # se bloquea toda la API salvo autenticación y el propio cambio.
+    if user.must_change_password and not request.url.path.startswith("/api/v1/auth/"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "password_change_required")
+
     return CurrentUser(
         id=user.id,
         email=user.email,
         role=user.role,
         full_name=user.full_name,
         photo_url=user.photo_url,
+        must_change_password=user.must_change_password,
     )
 
 

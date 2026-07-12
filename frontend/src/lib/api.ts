@@ -70,6 +70,13 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
       const body = await res.json();
       detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body);
     } catch {}
+    // Cambio de contraseña obligatorio: el backend bloquea todo hasta cumplirlo
+    if (res.status === 403 && detail === "password_change_required" && typeof window !== "undefined") {
+      if (!window.location.pathname.startsWith("/perfil")) {
+        window.location.href = "/perfil?pw=obligatorio";
+      }
+      throw new Error("Debés cambiar tu contraseña para continuar");
+    }
     const err = new Error(detail) as Error & { status?: number };
     err.status = res.status;
     throw err;

@@ -26,6 +26,24 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Doble factor: el login devuelve un token intermedio y pedimos el código
+  const [tempToken, setTempToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+
+  const finishLogin = (data: any) => {
+    setSession(data.access_token, data.refresh_token, {
+      id: data.user_id,
+      email: data.user_email,
+      role: data.user_role,
+      full_name: data.user_name,
+      photo_url: data.user_photo_url,
+    });
+    if (data.must_change_password) {
+      window.location.href = "/perfil?pw=obligatorio";
+      return;
+    }
+    router.push(data.user_role === "visualizador" ? "/view" : "/dashboard");
+  };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,16 +54,30 @@ export default function LoginPage() {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
-      setSession(data.access_token, data.refresh_token, {
-        id: data.user_id,
-        email: data.user_email,
-        role: data.user_role,
-        full_name: data.user_name,
-        photo_url: data.user_photo_url,
-      });
-      router.push(data.user_role === "visualizador" ? "/view" : "/dashboard");
+      if (data.requires_2fa) {
+        setTempToken(data.temp_token);
+        return;
+      }
+      finishLogin(data);
     } catch (err: any) {
       setError(err.message || "Error de autenticación");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onSubmit2fa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const data = await apiFetch<any>("/api/v1/auth/2fa", {
+        method: "POST",
+        body: JSON.stringify({ temp_token: tempToken, code }),
+      });
+      finishLogin(data);
+    } catch (err: any) {
+      setError(err.message || "Código incorrecto");
     } finally {
       setLoading(false);
     }
@@ -108,39 +140,76 @@ export default function LoginPage() {
             Accedé a tus proyectos de investigación.
           </p>
 
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <label className="label">Email</label>
-              <input
-                type="email"
-                className="input"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="tu@empresa.com.py"
-                required
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="label">Contraseña</label>
-              <input
-                type="password"
-                className="input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
-            </div>
-            {error && (
-              <div className="rounded-md bg-brand-primary-light text-brand-primary-dark text-sm px-3 py-2 animate-pop">
-                {error}
+          {tempToken ? (
+            <form onSubmit={onSubmit2fa} className="space-y-4">
+              <div className="rounded-md bg-brand-bg border border-brand-border px-4 py-3 text-sm text-brand-graphite">
+                🔐 Tu cuenta tiene <b>doble autenticación</b>: ingresá el código de tu
+                app (Google Authenticator o similar).
               </div>
-            )}
-            <button type="submit" className="btn-primary w-full" disabled={loading}>
-              {loading ? "Ingresando…" : "Ingresar"}
-            </button>
-          </form>
+              <input
+                className="input text-center text-2xl tracking-[0.4em] font-bold"
+                placeholder="000000"
+                value={code}
+                inputMode="numeric"
+                maxLength={8}
+                autoFocus
+                onChange={(e) => setCode(e.target.value)}
+              />
+              {error && (
+                <div className="rounded-md bg-brand-primary-light text-brand-primary-dark text-sm px-3 py-2 animate-pop">
+                  {error}
+                </div>
+              )}
+              <button type="submit" className="btn-primary w-full" disabled={loading || code.length < 6}>
+                {loading ? "Verificando…" : "Verificar código"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost w-full text-xs"
+                onClick={() => {
+                  setTempToken(null);
+                  setCode("");
+                  setError("");
+                }}
+              >
+                ← Volver
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={onSubmit} className="space-y-4">
+              <div>
+                <label className="label">Email</label>
+                <input
+                  type="email"
+                  className="input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="tu@empresa.com.py"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="label">Contraseña</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+              {error && (
+                <div className="rounded-md bg-brand-primary-light text-brand-primary-dark text-sm px-3 py-2 animate-pop">
+                  {error}
+                </div>
+              )}
+              <button type="submit" className="btn-primary w-full" disabled={loading}>
+                {loading ? "Ingresando…" : "Ingresar"}
+              </button>
+            </form>
+          )}
 
           {/* Fuentes de clase mundial */}
           <div className="mt-10">

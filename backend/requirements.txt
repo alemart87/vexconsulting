@@ -31,3 +31,4 @@ mdit-py-plugins==0.4.2
 pypandoc==1.14
 weasyprint==63.1
 mutagen==1.47.0
+pyotp==2.9.0
