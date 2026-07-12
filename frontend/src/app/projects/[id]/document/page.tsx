@@ -146,6 +146,87 @@ export default function DocumentPage() {
   const [summary, setSummary] = useState("");
   const lockTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ---- UX pro del editor: stats en vivo, guardado visible, outline, enfoque ----
+  const [liveStats, setLiveStats] = useState<{ words: number; chars: number } | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [, setNowTick] = useState(0); // refresca el «guardado hace X»
+  const [focusMode, setFocusMode] = useState(false);
+  const [outline, setOutline] = useState<{ text: string; level: number }[]>([]);
+  const [activeHeading, setActiveHeading] = useState(-1);
+  const headingElsRef = useRef<HTMLElement[]>([]);
+
+  const recomputeOutline = useCallback(() => {
+    const root = document.querySelector('[data-tour="editor"] .tiptap');
+    if (!root) return;
+    const els = Array.from(root.querySelectorAll<HTMLElement>("h1, h2, h3"));
+    headingElsRef.current = els;
+    setOutline(
+      els.map((el) => ({
+        text: el.textContent || "…",
+        level: Number(el.tagName.slice(1)),
+      }))
+    );
+  }, []);
+
+  const handleStats = useCallback(
+    (stats: { words: number; chars: number }) => {
+      setLiveStats(stats);
+      requestAnimationFrame(recomputeOutline);
+    },
+    [recomputeOutline]
+  );
+
+  // Scroll-spy: resalta en el índice la sección visible
+  useEffect(() => {
+    const onScroll = () => {
+      const els = headingElsRef.current;
+      let active = -1;
+      for (let i = 0; i < els.length; i++) {
+        if (els[i].getBoundingClientRect().top < 170) active = i;
+        else break;
+      }
+      setActiveHeading(active);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const jumpToHeading = (i: number) => {
+    const el = headingElsRef.current[i];
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.scrollY - 165;
+    window.scrollTo({ top: y, behavior: "smooth" });
+  };
+
+  // «Guardado hace X min» se refresca solo
+  useEffect(() => {
+    if (!lastSavedAt) return;
+    const t = setInterval(() => setNowTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, [lastSavedAt]);
+
+  // Nunca perder trabajo: aviso del navegador si hay cambios sin guardar
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  // Esc sale del modo enfoque
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFocusMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusMode]);
+
   // ---- Edición final APA (job de fondo previo a publicar) ----
   const [editorKey, setEditorKey] = useState(0); // remonta el editor al cargar la edición
   const [finalDismissed, setFinalDismissed] = useState(false);
@@ -373,7 +454,7 @@ export default function DocumentPage() {
         setDirty(false);
         setConflict(false);
         setSummary("");
-        setStatus(`Guardado · ${updated.word_count.toLocaleString("es-PY")} palabras`);
+        setLastSavedAt(Date.now());
       } catch (e: any) {
         if (e.status === 409) setConflict(true);
         else setStatus(`Error: ${e.message}`);
@@ -634,17 +715,66 @@ export default function DocumentPage() {
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="text-xs text-brand-slate flex items-center gap-2 flex-wrap">
+          {/* Estado de guardado en vivo */}
+          {editable && (
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
+                saving
+                  ? "border-brand-cyan/50 text-brand-cyan"
+                  : dirty
+                    ? "border-brand-orange/60 text-brand-orange"
+                    : "border-emerald-300 text-emerald-700"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  saving
+                    ? "bg-brand-cyan animate-pulse"
+                    : dirty
+                      ? "bg-brand-orange animate-pulse"
+                      : "bg-emerald-500"
+                }`}
+              />
+              {saving
+                ? "Guardando…"
+                : dirty
+                  ? "Cambios sin guardar"
+                  : lastSavedAt
+                    ? `Guardado ${
+                        Date.now() - lastSavedAt < 60_000
+                          ? "recién"
+                          : `hace ${Math.round((Date.now() - lastSavedAt) / 60_000)} min`
+                      }`
+                    : "Todo guardado"}
+            </span>
+          )}
           <span>
-            {doc.word_count.toLocaleString("es-PY")} palabras · actualizado{" "}
-            {formatDate(doc.updated_at)} ·{" "}
+            {(liveStats?.words ?? doc.word_count).toLocaleString("es-PY")} palabras ·{" "}
+            {Math.max(1, Math.round((liveStats?.words ?? doc.word_count) / 200))} min de
+            lectura ·{" "}
             <Link
               href={`/projects/${params.id}/document/versions`}
               data-tour="historial"
               className="text-brand-cyan underline"
             >
-              historial de versiones
+              historial
             </Link>
           </span>
+          <button
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+              focusMode
+                ? "border-brand-purple bg-brand-purple text-white"
+                : "border-brand-border text-brand-slate hover:border-brand-purple hover:text-brand-purple"
+            }`}
+            onClick={() => setFocusMode((v) => !v)}
+            title={
+              focusMode
+                ? "Salir del modo enfoque (Esc)"
+                : "Modo enfoque: oculta el panel y centra el documento para escribir"
+            }
+          >
+            {focusMode ? "✕ Enfoque" : "⛶ Enfoque"}
+          </button>
           <button
             className="rounded-full border border-brand-border px-2 py-0.5 text-[11px] font-semibold text-brand-slate hover:border-brand-primary hover:text-brand-primary transition-colors"
             onClick={() => startTour(TOUR_INTRO)}
@@ -693,21 +823,60 @@ export default function DocumentPage() {
       </div>
       {status && <div className="text-xs text-emerald-700">{status}</div>}
 
-      {/* ==== Editor + Panel de agentes (siempre visible) ==== */}
-      <div className="grid gap-4 xl:grid-cols-5">
-        <div className="xl:col-span-3 min-w-0" data-tour="editor">
-          <MarkdownEditor
-            key={`editor-${editorKey}`}
-            projectId={params.id}
-            initialMarkdown={doc.content_md}
-            editable={editable}
-            onDirty={setDirty}
-            editorRef={editorRef}
-          />
+      {/* ==== Índice + Editor + Panel de agentes ==== */}
+      <div
+        className={`grid gap-4 ${
+          focusMode
+            ? "xl:grid-cols-[210px_minmax(0,1fr)]"
+            : "xl:grid-cols-[210px_minmax(0,1fr)_minmax(0,36%)]"
+        }`}
+      >
+        {/* Índice del documento (navegación tipo Google Docs) */}
+        <aside className="hidden xl:block xl:sticky xl:top-36 h-fit">
+          <div className="card p-3 max-h-[70vh] overflow-y-auto scrollbar-thin">
+            <div className="label !mb-2">Índice</div>
+            {outline.length === 0 ? (
+              <p className="text-[11px] text-brand-mist leading-relaxed">
+                Los títulos (H1–H3) del documento aparecen acá para navegarlo.
+              </p>
+            ) : (
+              outline.map((h, i) => (
+                <button
+                  key={`${i}-${h.text.slice(0, 20)}`}
+                  onClick={() => jumpToHeading(i)}
+                  className={`block w-full text-left text-[12px] leading-snug py-1 pr-1 truncate transition-colors border-l-2 ${
+                    activeHeading === i
+                      ? "border-brand-primary text-brand-primary font-bold bg-brand-primary-light/40"
+                      : "border-transparent text-brand-slate hover:text-brand-ink hover:border-brand-border"
+                  }`}
+                  style={{ paddingLeft: 8 + (h.level - 1) * 11 }}
+                  title={h.text}
+                >
+                  {h.text}
+                </button>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <div className="min-w-0" data-tour="editor">
+          <div className={focusMode ? "max-w-4xl mx-auto" : ""}>
+            <MarkdownEditor
+              key={`editor-${editorKey}`}
+              projectId={params.id}
+              initialMarkdown={doc.content_md}
+              editable={editable}
+              onDirty={setDirty}
+              onStats={handleStats}
+              zen={focusMode}
+              editorRef={editorRef}
+            />
+          </div>
         </div>
 
+        {!focusMode && (
         <aside
-          className="xl:col-span-2 xl:sticky xl:top-20 h-fit space-y-3"
+          className="xl:sticky xl:top-20 h-fit space-y-3"
           data-tour="panel-ia"
         >
           <div className="card overflow-hidden">
@@ -1165,6 +1334,7 @@ export default function DocumentPage() {
             </div>
           )}
         </aside>
+        )}
       </div>
 
       {/* Visita guiada (bienvenida / post-edición APA) */}

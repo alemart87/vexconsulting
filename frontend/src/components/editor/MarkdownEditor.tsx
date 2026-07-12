@@ -19,6 +19,10 @@ interface Props {
   editable: boolean;
   onDirty?: (dirty: boolean) => void;
   onRequestAi?: (contextText: string, insert: (text: string) => void) => void;
+  /** Conteo de palabras en vivo (debounced) — para la barra de estado. */
+  onStats?: (stats: { words: number; chars: number }) => void;
+  /** Modo enfoque: tipografía más grande y cómoda para escribir largo. */
+  zen?: boolean;
 }
 
 export interface EditorHandle {
@@ -32,11 +36,13 @@ export interface EditorHandle {
 function ToolbarButton({
   onClick,
   active,
+  disabled,
   children,
   title,
 }: {
   onClick: () => void;
   active?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
   title: string;
 }) {
@@ -44,9 +50,10 @@ function ToolbarButton({
     <button
       type="button"
       title={title}
+      disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className={`px-2.5 py-1.5 rounded text-sm font-semibold transition-colors ${
+      className={`px-2.5 py-1.5 rounded text-sm font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
         active ? "bg-brand-primary text-white" : "text-brand-slate hover:bg-brand-bg"
       }`}
     >
@@ -61,10 +68,28 @@ export default function MarkdownEditor({
   editable,
   onDirty,
   onRequestAi,
+  onStats,
+  zen,
   editorRef,
 }: Props & { editorRef?: React.MutableRefObject<EditorHandle | null> }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const statsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const emitStats = useCallback(
+    (ed: any) => {
+      if (!onStats) return;
+      if (statsTimer.current) clearTimeout(statsTimer.current);
+      statsTimer.current = setTimeout(() => {
+        const text: string = ed?.state?.doc?.textContent ?? "";
+        const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+        onStats({ words, chars: text.length });
+      }, 400);
+    },
+    [onStats]
+  );
 
   const editor = useEditor({
     editable,
@@ -85,8 +110,16 @@ export default function MarkdownEditor({
       }),
     ],
     content: initialMarkdown,
-    onUpdate: () => onDirty?.(true),
+    onCreate: ({ editor: ed }) => emitStats(ed),
+    onUpdate: ({ editor: ed }) => {
+      onDirty?.(true);
+      emitStats(ed);
+    },
   });
+
+  useEffect(() => () => {
+    if (statsTimer.current) clearTimeout(statsTimer.current);
+  }, []);
 
   useEffect(() => {
     if (editorRef) {
@@ -138,6 +171,24 @@ export default function MarkdownEditor({
     [editor, projectId]
   );
 
+  const openLink = () => {
+    if (!editor) return;
+    setLinkUrl(editor.getAttributes("link").href || "");
+    setLinkOpen(true);
+  };
+
+  const applyLink = () => {
+    if (!editor) return;
+    const url = linkUrl.trim();
+    if (url) {
+      editor.chain().focus().setLink({ href: url.startsWith("http") ? url : `https://${url}` }).run();
+    } else {
+      editor.chain().focus().unsetLink().run();
+    }
+    setLinkOpen(false);
+    setLinkUrl("");
+  };
+
   if (!editor) return <div className="card p-10 text-center text-brand-slate">Cargando editor…</div>;
 
   return (
@@ -145,39 +196,47 @@ export default function MarkdownEditor({
     // contenedor de scroll y la barra sticky queda empujada 64px, tapando el título.
     <div className="card overflow-clip">
       {editable && (
-        <div className="flex flex-wrap items-center gap-0.5 border-b border-brand-border bg-brand-bg-soft px-2 py-1.5 sticky top-[120px] z-20">
-          <ToolbarButton title="Título 1" active={editor.isActive("heading", { level: 1 })}
+        <div className="relative flex flex-wrap items-center gap-0.5 border-b border-brand-border bg-brand-bg-soft px-2 py-1.5 sticky top-[120px] z-20">
+          <ToolbarButton title="Deshacer (Ctrl+Z)" disabled={!editor.can().undo()}
+            onClick={() => editor.chain().focus().undo().run()}>↶</ToolbarButton>
+          <ToolbarButton title="Rehacer (Ctrl+Y)" disabled={!editor.can().redo()}
+            onClick={() => editor.chain().focus().redo().run()}>↷</ToolbarButton>
+          <span className="w-px h-5 bg-brand-border mx-1" />
+          <ToolbarButton title="Título 1 (Ctrl+Alt+1)" active={editor.isActive("heading", { level: 1 })}
             onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>H1</ToolbarButton>
-          <ToolbarButton title="Título 2" active={editor.isActive("heading", { level: 2 })}
+          <ToolbarButton title="Título 2 (Ctrl+Alt+2)" active={editor.isActive("heading", { level: 2 })}
             onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</ToolbarButton>
-          <ToolbarButton title="Título 3" active={editor.isActive("heading", { level: 3 })}
+          <ToolbarButton title="Título 3 (Ctrl+Alt+3)" active={editor.isActive("heading", { level: 3 })}
             onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</ToolbarButton>
           <span className="w-px h-5 bg-brand-border mx-1" />
-          <ToolbarButton title="Negrita" active={editor.isActive("bold")}
+          <ToolbarButton title="Negrita (Ctrl+B)" active={editor.isActive("bold")}
             onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></ToolbarButton>
-          <ToolbarButton title="Cursiva" active={editor.isActive("italic")}
+          <ToolbarButton title="Cursiva (Ctrl+I)" active={editor.isActive("italic")}
             onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></ToolbarButton>
-          <ToolbarButton title="Código" active={editor.isActive("code")}
+          <ToolbarButton title="Tachado (Ctrl+Shift+S)" active={editor.isActive("strike")}
+            onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></ToolbarButton>
+          <ToolbarButton title="Código (Ctrl+E)" active={editor.isActive("code")}
             onClick={() => editor.chain().focus().toggleCode().run()}>{"</>"}</ToolbarButton>
           <span className="w-px h-5 bg-brand-border mx-1" />
-          <ToolbarButton title="Lista" active={editor.isActive("bulletList")}
+          <ToolbarButton title="Lista (Ctrl+Shift+8)" active={editor.isActive("bulletList")}
             onClick={() => editor.chain().focus().toggleBulletList().run()}>•</ToolbarButton>
-          <ToolbarButton title="Lista numerada" active={editor.isActive("orderedList")}
+          <ToolbarButton title="Lista numerada (Ctrl+Shift+7)" active={editor.isActive("orderedList")}
             onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</ToolbarButton>
-          <ToolbarButton title="Cita" active={editor.isActive("blockquote")}
+          <ToolbarButton title="Cita (Ctrl+Shift+B)" active={editor.isActive("blockquote")}
             onClick={() => editor.chain().focus().toggleBlockquote().run()}>❝</ToolbarButton>
+          <ToolbarButton title="Separador horizontal"
+            onClick={() => editor.chain().focus().setHorizontalRule().run()}>―</ToolbarButton>
           <span className="w-px h-5 bg-brand-border mx-1" />
-          <ToolbarButton title="Tabla"
+          <ToolbarButton title="Tabla 3×3"
             onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>⊞</ToolbarButton>
           <ToolbarButton title="Insertar imagen" onClick={() => fileInput.current?.click()}>
             {uploading ? "…" : "🖼"}
           </ToolbarButton>
-          <ToolbarButton title="Enlace" active={editor.isActive("link")}
-            onClick={() => {
-              const url = window.prompt("URL del enlace:");
-              if (url) editor.chain().focus().setLink({ href: url }).run();
-              else editor.chain().focus().unsetLink().run();
-            }}>🔗</ToolbarButton>
+          <ToolbarButton title="Enlace (Ctrl+K)" active={editor.isActive("link")} onClick={openLink}>
+            🔗
+          </ToolbarButton>
+          <ToolbarButton title="Limpiar formato"
+            onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()}>⌫</ToolbarButton>
           {onRequestAi && (
             <>
               <span className="w-px h-5 bg-brand-border mx-1" />
@@ -216,9 +275,35 @@ export default function MarkdownEditor({
               e.currentTarget.value = "";
             }}
           />
+          {/* Popover de enlace (reemplaza el prompt nativo) */}
+          {linkOpen && (
+            <div className="absolute top-full left-2 right-2 sm:left-auto sm:right-auto sm:w-80 mt-1 glass rounded-xl p-2 z-30 animate-pop flex gap-1.5">
+              <input
+                autoFocus
+                className="input !py-1.5 text-xs flex-1"
+                placeholder="https://…  (vacío = quitar enlace)"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applyLink();
+                  }
+                  if (e.key === "Escape") setLinkOpen(false);
+                }}
+              />
+              <button className="btn-primary !px-3 !py-1.5 text-xs" onClick={applyLink}>OK</button>
+              <button className="btn-ghost !px-2 !py-1.5 text-xs" onClick={() => setLinkOpen(false)}>✕</button>
+            </div>
+          )}
         </div>
       )}
-      <EditorContent editor={editor} className="prose-vex tiptap px-6 py-5 min-h-[60vh]" />
+      <EditorContent
+        editor={editor}
+        className={`prose-vex tiptap min-h-[60vh] ${
+          zen ? "px-8 sm:px-12 py-8 prose-zen" : "px-6 py-5"
+        }`}
+      />
     </div>
   );
 }

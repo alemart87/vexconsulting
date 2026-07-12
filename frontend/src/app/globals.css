@@ -357,6 +357,14 @@ h3,
 .prose-vex th { @apply bg-brand-bg border border-brand-border px-3 py-2 text-left font-semibold; word-break: break-word; }
 .prose-vex td { @apply border border-brand-border px-3 py-2; word-break: break-word; }
 
+/* Modo enfoque del editor: tipografía de lectura larga */
+.prose-zen {
+  font-size: 17px;
+  line-height: 1.8;
+}
+.prose-zen h1 { font-size: 2.4rem; }
+.prose-zen h2 { font-size: 1.8rem; }
+
 .tiptap:focus { outline: none; }
 .tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
