@@ -7,6 +7,74 @@ import remarkGfm from "remark-gfm";
 import { apiFetch, formatDate } from "@/lib/api";
 import { useProject } from "@/components/ProjectContext";
 
+/** Iconos de línea corporativos (sin emojis): stroke en currentColor. */
+function Icon({ name, className = "h-5 w-5" }: { name: string; className?: string }) {
+  const common = {
+    className,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  switch (name) {
+    case "audio":
+      return (
+        <svg {...common}>
+          <path d="M4 14v-1a8 8 0 0 1 16 0v1" />
+          <rect x="3" y="14" width="4" height="6" rx="1.5" />
+          <rect x="17" y="14" width="4" height="6" rx="1.5" />
+        </svg>
+      );
+    case "mindmap":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="5" r="2.2" />
+          <circle cx="5" cy="18" r="2.2" />
+          <circle cx="19" cy="18" r="2.2" />
+          <path d="M12 7.5v3m0 0-5.3 5.3M12 10.5l5.3 5.3" />
+        </svg>
+      );
+    case "briefing":
+      return (
+        <svg {...common}>
+          <rect x="5" y="3" width="14" height="18" rx="2" />
+          <path d="M9 8h6M9 12h6M9 16h4" />
+        </svg>
+      );
+    case "faq":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.4 9.4a2.6 2.6 0 1 1 3.7 2.4c-.8.4-1.1.9-1.1 1.8" />
+          <path d="M12 16.8v.2" />
+        </svg>
+      );
+    case "download":
+      return (
+        <svg {...common}>
+          <path d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" />
+        </svg>
+      );
+    case "copy":
+      return (
+        <svg {...common}>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+        </svg>
+      );
+    case "refresh":
+      return (
+        <svg {...common}>
+          <path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 interface Item {
   id: string;
   kind: "audio" | "mindmap" | "briefing" | "faq";
@@ -230,7 +298,7 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
     <div className="fixed inset-0 z-[80] bg-white flex flex-col animate-fade">
       <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14 border-b border-brand-border shrink-0 bg-brand-bg-soft">
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="text-xl">🧠</span>
+          <Icon name="mindmap" className="h-5 w-5 text-brand-purple shrink-0" />
           <span className="font-display uppercase text-brand-ink truncate">{title}</span>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -263,11 +331,11 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
           <Tool label="＋" title="Acercar" onClick={() => mmRef.current?.rescale(1.3)} />
           <Tool label="⤢ Ajustar" title="Ajustar el mapa a la pantalla" onClick={() => mmRef.current?.fit()} />
           <span className="w-px h-6 bg-brand-border mx-0.5" />
-          <button className="btn-secondary !py-1.5 text-xs" onClick={downloadSvg}>
-            ⬇ SVG
+          <button className="btn-secondary !py-1.5 text-xs inline-flex items-center gap-1.5" onClick={downloadSvg}>
+            <Icon name="download" className="h-3.5 w-3.5" /> SVG
           </button>
           <button className="btn-ghost !py-1.5 text-xs" onClick={onClose}>
-            ✕ Cerrar
+            Cerrar
           </button>
         </div>
       </div>
@@ -357,7 +425,7 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
                   className="btn-ghost !py-1.5 text-xs flex-1"
                   onClick={() => setDetail(null)}
                 >
-                  ✕ Cerrar detalle
+                  Cerrar detalle
                 </button>
               </div>
             </>
@@ -365,7 +433,7 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
         </div>
       </div>
       <div className="px-4 py-2 text-[11px] text-brand-slate border-t border-brand-border shrink-0 bg-brand-bg-soft">
-        💡 Clic en el <b>texto</b> de un tema para ver su detalle · clic en el{" "}
+        <b>Cómo se usa:</b> clic en el <b>texto</b> de un tema para ver su detalle · clic en el{" "}
         <b>círculo</b> para expandir/colapsar la rama · «Ramas / Detalle / Todo» controla
         la profundidad · rueda para zoom · arrastrá para moverte · «Ajustar» recompone
       </div>
@@ -439,7 +507,7 @@ function AudioPlayer({ src }: { src: string }) {
   }, [src]);
 
   if (error)
-    return <div className="text-xs text-brand-orange py-3">⚠ {error} — probá «Descargar MP3».</div>;
+    return <div className="text-xs text-brand-orange py-3">{error} — probá «Descargar MP3».</div>;
   if (!blobUrl)
     return (
       <div className="flex items-center gap-3 py-3">
@@ -571,8 +639,8 @@ export default function KnowHubPage() {
         <div className="p-6 md:p-8">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-4 min-w-0">
-              <div className="h-14 w-14 shrink-0 rounded-2xl bg-gradient-to-br from-brand-primary to-brand-orange flex items-center justify-center text-3xl">
-                🎧
+              <div className="h-14 w-14 shrink-0 rounded-2xl bg-gradient-to-br from-brand-primary to-brand-orange flex items-center justify-center text-white">
+                <Icon name="audio" className="h-7 w-7" />
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] uppercase tracking-wider2 text-white/60">
@@ -583,7 +651,7 @@ export default function KnowHubPage() {
                 </div>
               </div>
             </div>
-            <GenerateBtn kind="audio" label={audio ? "↻ Regenerar" : "✦ Generar audio"} />
+            <GenerateBtn kind="audio" label={audio ? "Regenerar" : "Generar audio"} />
           </div>
 
           <div className="mt-5">
@@ -613,13 +681,13 @@ export default function KnowHubPage() {
                       href={`/api/v1/projects/${params.id}/knowhub/${audio.id}/audio`}
                       download
                     >
-                      ⬇ Descargar MP3
+                      Descargar MP3
                     </a>
                     <button
                       className="text-xs text-white/80 hover:text-white underline underline-offset-2"
                       onClick={() => setScriptOpen((v) => !v)}
                     >
-                      {scriptOpen ? "Ocultar guion" : "📄 Ver guion"}
+                      {scriptOpen ? "Ocultar guion" : "Ver guion"}
                     </button>
                   </div>
                 </div>
@@ -634,21 +702,21 @@ export default function KnowHubPage() {
         </div>
       </div>
 
-      {/* ===== 🧠 Mapa mental (ancho) + 📋 Briefing / ❓ FAQ ===== */}
+      {/* ===== Mapa mental (ancho) + Briefing / FAQ ===== */}
       <div className="grid gap-4 xl:grid-cols-5">
         {/* Mapa mental con vista previa en vivo */}
         <div className="xl:col-span-3 card p-6 border-t-4" style={{ borderTopColor: "#662483" }}>
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
-              <div className="font-display text-lg uppercase text-brand-ink">
-                🧠 Mapa mental
+              <div className="font-display text-lg uppercase text-brand-ink flex items-center gap-2">
+                <Icon name="mindmap" className="h-5 w-5 text-brand-purple" /> Mapa mental
               </div>
               <p className="text-xs text-brand-slate mt-0.5">
                 La estructura completa del proyecto: hipótesis, evidencia y conclusiones
                 con sus cifras. Clic para explorarlo con zoom y ramas colapsables.
               </p>
             </div>
-            <GenerateBtn kind="mindmap" label={mindmap ? "↻ Regenerar" : "✦ Generar"} />
+            <GenerateBtn kind="mindmap" label={mindmap ? "Regenerar" : "Generar"} />
           </div>
           {mindmap?.status === "running" && <Running text="Dibujando el mapa del proyecto…" />}
           {mindmap?.status === "failed" && <Failed it={mindmap} kind="mindmap" />}
@@ -671,13 +739,13 @@ export default function KnowHubPage() {
         <div className="xl:col-span-2 space-y-4">
           {[
             {
-              kind: "briefing" as const, icon: "📋", color: "#00B2BF",
+              kind: "briefing" as const, icon: "briefing", color: "#00B2BF",
               title: "Briefing ejecutivo",
               desc: "Una página para entender el proyecto en 3 minutos.",
               item: briefing,
             },
             {
-              kind: "faq" as const, icon: "❓", color: "#F39200",
+              kind: "faq" as const, icon: "faq", color: "#F39200",
               title: "Preguntas frecuentes",
               desc: "Lo que preguntaría un miembro nuevo del equipo.",
               item: faq,
@@ -686,12 +754,15 @@ export default function KnowHubPage() {
             <div key={kind} className="card p-6 border-t-4" style={{ borderTopColor: color }}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="font-display text-lg uppercase text-brand-ink">
-                    {icon} {title}
+                  <div className="font-display text-lg uppercase text-brand-ink flex items-center gap-2">
+                    <span style={{ color }}>
+                      <Icon name={icon} className="h-5 w-5" />
+                    </span>
+                    {title}
                   </div>
                   <p className="text-xs text-brand-slate mt-0.5">{desc}</p>
                 </div>
-                <GenerateBtn kind={kind} label={item ? "↻ Regenerar" : "✦ Generar"} />
+                <GenerateBtn kind={kind} label={item ? "Regenerar" : "Generar"} />
               </div>
               <div className="mt-3">
                 {item?.status === "running" && <Running text="Redactando…" />}
@@ -707,7 +778,7 @@ export default function KnowHubPage() {
                         className="text-[11px] text-brand-cyan hover:underline"
                         onClick={() => navigator.clipboard.writeText(item.content_md || "")}
                       >
-                        ⧉ Copiar
+                        Copiar
                       </button>
                     </div>
                   </>
