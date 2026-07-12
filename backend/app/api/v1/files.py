@@ -62,6 +62,25 @@ async def get_avatar(name: str) -> FileResponse:
     return FileResponse(target, headers={"Cache-Control": "private, max-age=86400"})
 
 
+@router.get("/projects/{project_id}/chat-files/{name}")
+async def get_chat_file(project_id: str, name: str, dl: str | None = None) -> FileResponse:
+    """Adjunto del chat como URL-capacidad (uuid impredecible + uuid del
+    proyecto). Con ?dl=nombre fuerza descarga con el nombre original."""
+    import re
+
+    if not re.fullmatch(r"[a-f0-9]{32}\.[a-z0-9]{2,5}", name):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nombre inválido")
+    target = settings.upload_path / project_id / "chat" / name
+    if not target.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Archivo no encontrado")
+    filename = None
+    if dl:
+        filename = dl.replace("/", "").replace("\\", "").replace('"', "")[:200]
+    return FileResponse(
+        target, filename=filename, headers={"Cache-Control": "private, max-age=86400"}
+    )
+
+
 @router.get("/projects/{project_id}/images/{name}")
 async def get_image(project_id: str, name: str) -> FileResponse:
     """Sirve la imagen SIN header de autenticación (una etiqueta <img> no puede

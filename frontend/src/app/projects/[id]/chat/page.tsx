@@ -11,10 +11,17 @@ interface Channel {
   id: string;
   kind: string;
   name: string;
+  dm_user_id?: string | null;
   last_message?: string;
   last_at?: string;
   unread_count?: number;
   last_read_at?: string | null;
+}
+interface Attachment {
+  name: string;
+  url: string;
+  mime: string;
+  size: number;
 }
 interface Msg {
   id: string;
@@ -26,8 +33,20 @@ interface Msg {
   mentions?: { users?: { id: string; name: string }[]; notes?: { id: string; title: string }[] };
   parent_id?: string | null;
   reactions?: Record<string, string[]>;
+  attachments?: Attachment[] | null;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
   edited_at?: string | null;
   reply_count?: number;
+  created_at: string;
+}
+interface SearchHit {
+  id: string;
+  channel_id: string;
+  channel_name: string;
+  channel_kind: string;
+  user_name: string;
+  content: string;
   created_at: string;
 }
 interface Mentionable {
@@ -50,9 +69,59 @@ const fingerprint = (list: Msg[]) =>
   list
     .map(
       (m) =>
-        `${m.id}|${m.edited_at || ""}|${m.deleted ? "d" : ""}|${m.reply_count || 0}|${JSON.stringify(m.reactions || {})}`
+        `${m.id}|${m.edited_at || ""}|${m.deleted ? "d" : ""}|${m.reply_count || 0}|${m.pinned_at || ""}|${JSON.stringify(m.reactions || {})}`
     )
     .join(";");
+
+const fmtSize = (bytes: number) =>
+  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+const fileIcon = (mime: string, name: string) => {
+  const n = name.toLowerCase();
+  if (mime.includes("pdf") || n.endsWith(".pdf")) return "📕";
+  if (/\.(xlsx?|csv)$/.test(n)) return "📊";
+  if (/\.(docx?|txt|md)$/.test(n)) return "📄";
+  if (/\.(pptx?)$/.test(n)) return "📽️";
+  if (n.endsWith(".zip")) return "🗜️";
+  return "📎";
+};
+
+/** Adjuntos del mensaje: imágenes inline, resto como chip descargable. */
+function AttachmentList({ list, mine }: { list?: Attachment[] | null; mine: boolean }) {
+  if (!list?.length) return null;
+  return (
+    <div className="flex flex-col gap-1.5 mt-1.5">
+      {list.map((a, i) =>
+        a.mime.startsWith("image/") ? (
+          <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" title={a.name}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={a.url}
+              alt={a.name}
+              className="max-h-56 max-w-full rounded-lg border border-black/10 shadow-soft"
+            />
+          </a>
+        ) : (
+          <a
+            key={i}
+            href={`${a.url}?dl=${encodeURIComponent(a.name)}`}
+            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors ${
+              mine
+                ? "bg-white/15 border-white/30 text-white hover:bg-white/25"
+                : "bg-brand-bg border-brand-border text-brand-ink hover:border-brand-cyan"
+            }`}
+          >
+            <span className="text-base leading-none">{fileIcon(a.mime, a.name)}</span>
+            <span className="truncate max-w-[220px]">{a.name}</span>
+            <span className={`shrink-0 font-normal ${mine ? "text-white/70" : "text-brand-mist"}`}>
+              {fmtSize(a.size)}
+            </span>
+          </a>
+        )
+      )}
+    </div>
+  );
+}
 
 /** Emojis frecuentes para el chat de trabajo (sin dependencias). */
 const EMOJIS = [
@@ -157,9 +226,10 @@ function ReactionChips({
   );
 }
 
-/** Toolbar flotante al pasar el mouse: reacciones rápidas, hilo, editar, borrar. */
+/** Toolbar flotante al pasar el mouse: reacciones rápidas, hilo, fijar,
+ *  editar y borrar. Superficie liquid-glass sobre los mensajes. */
 function MsgToolbar({
-  m, mine, canDelete, confirmDelete, onReact, onThread, onEdit, onDelete,
+  m, mine, canDelete, confirmDelete, onReact, onThread, onPin, onEdit, onDelete,
 }: {
   m: Msg;
   mine: boolean;
@@ -167,17 +237,18 @@ function MsgToolbar({
   confirmDelete: boolean;
   onReact: (m: Msg, emoji: string) => void;
   onThread?: (m: Msg) => void;
+  onPin?: (m: Msg) => void;
   onEdit?: (m: Msg) => void;
   onDelete: (m: Msg) => void;
 }) {
   return (
     <div
-      className={`absolute -top-3.5 ${mine ? "right-2" : "left-2"} hidden group-hover:flex items-center gap-0.5 bg-white border border-brand-border rounded-full shadow-elevated px-1 py-0.5 z-10`}
+      className={`absolute -top-3.5 ${mine ? "right-2" : "left-2"} hidden group-hover:flex items-center gap-0.5 glass rounded-full px-1 py-0.5 z-10`}
     >
       {QUICK_REACTIONS.map((e) => (
         <button
           key={e}
-          className="h-6 w-6 rounded-full hover:bg-brand-bg text-[14px] leading-none transition-transform hover:scale-125"
+          className="h-6 w-6 rounded-full hover:bg-white/70 text-[14px] leading-none transition-transform hover:scale-125"
           title={`Reaccionar ${e}`}
           onClick={() => onReact(m, e)}
         >
@@ -186,16 +257,27 @@ function MsgToolbar({
       ))}
       {onThread && (
         <button
-          className="h-6 px-1.5 rounded-full hover:bg-brand-bg text-[12px] leading-none text-brand-slate"
+          className="h-6 px-1.5 rounded-full hover:bg-white/70 text-[12px] leading-none text-brand-slate"
           title="Responder en hilo"
           onClick={() => onThread(m)}
         >
           💬
         </button>
       )}
+      {onPin && (
+        <button
+          className={`h-6 px-1.5 rounded-full hover:bg-white/70 text-[12px] leading-none ${
+            m.pinned_at ? "text-brand-primary" : "text-brand-slate"
+          }`}
+          title={m.pinned_at ? "Desfijar del canal" : "Fijar en el canal"}
+          onClick={() => onPin(m)}
+        >
+          📌
+        </button>
+      )}
       {mine && onEdit && (
         <button
-          className="h-6 px-1.5 rounded-full hover:bg-brand-bg text-[12px] leading-none text-brand-slate"
+          className="h-6 px-1.5 rounded-full hover:bg-white/70 text-[12px] leading-none text-brand-slate"
           title="Editar"
           onClick={() => onEdit(m)}
         >
@@ -205,7 +287,7 @@ function MsgToolbar({
       {canDelete && (
         <button
           className={`h-6 px-1.5 rounded-full text-[11px] leading-none font-semibold ${
-            confirmDelete ? "bg-brand-primary text-white" : "hover:bg-brand-bg text-brand-slate"
+            confirmDelete ? "bg-brand-primary text-white" : "hover:bg-white/70 text-brand-slate"
           }`}
           title={confirmDelete ? "Confirmá para borrar" : "Borrar"}
           onClick={() => onDelete(m)}
@@ -239,6 +321,17 @@ export default function ChatPage() {
   const [editText, setEditText] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [dividerAt, setDividerAt] = useState<string | null>(null);
+  // V2: adjuntos, typing/presencia, pins y búsqueda
+  const [pendingFiles, setPendingFiles] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [typingNames, setTypingNames] = useState<string[]>([]);
+  const [onlineIds, setOnlineIds] = useState<string[]>([]);
+  const [pins, setPins] = useState<Msg[]>([]);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchHit[] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingSentRef = useRef(0);
 
   const msgScrollRef = useRef<HTMLDivElement>(null);
   const threadScrollRef = useRef<HTMLDivElement>(null);
@@ -273,6 +366,50 @@ export default function ChatPage() {
     setChannels(current ? list.map((c) => (c.id === current.id ? { ...c, unread_count: 0 } : c)) : list);
     return list;
   }, [params.id]);
+
+  const pingTyping = useCallback(() => {
+    const ch = activeRef.current;
+    if (!ch) return;
+    const now = Date.now();
+    if (now - typingSentRef.current < 2000) return;
+    typingSentRef.current = now;
+    apiFetch(`/api/v1/projects/${params.id}/chat/channels/${ch.id}/typing`, {
+      method: "POST",
+    }).catch(() => {});
+  }, [params.id]);
+
+  const loadPins = useCallback(
+    async (channelId: string) => {
+      try {
+        const list = await apiFetch<Msg[]>(
+          `/api/v1/projects/${params.id}/chat/channels/${channelId}/pins`
+        );
+        if (activeRef.current?.id === channelId) setPins(list);
+      } catch {}
+    },
+    [params.id]
+  );
+
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true);
+    try {
+      for (const f of Array.from(files).slice(0, 5 - pendingFiles.length)) {
+        const form = new FormData();
+        form.append("file", f);
+        const meta = await apiFetch<Attachment>(`/api/v1/projects/${params.id}/chat/upload`, {
+          method: "POST",
+          body: form,
+        });
+        setPendingFiles((prev) => (prev.length >= 5 ? prev : [...prev, meta]));
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   const markRead = useCallback(
     async (channelId: string) => {
@@ -313,6 +450,10 @@ export default function ChatPage() {
     setThread(null);
     setEditingId(null);
     setConfirmDeleteId(null);
+    setPins([]);
+    setPinsOpen(false);
+    setTypingNames([]);
+    loadPins(active.id);
     nearBottomRef.current = true;
     // Divisor «Nuevos mensajes»: donde quedó la última lectura
     setDividerAt(
@@ -334,6 +475,13 @@ export default function ChatPage() {
           lastReadPostedRef.current = latest;
           markRead(active.id);
         }
+        // Typing + presencia del proyecto
+        const act = await apiFetch<{ typing: string[]; online: string[] }>(
+          `/api/v1/projects/${params.id}/chat/channels/${active.id}/activity`
+        );
+        if (stopped || activeRef.current?.id !== active.id) return;
+        setTypingNames(act.typing);
+        setOnlineIds(act.online);
       } catch {}
     };
     poll();
@@ -343,7 +491,7 @@ export default function ChatPage() {
       stopped = true;
       clearInterval(interval);
     };
-  }, [active, params.id, markRead]);
+  }, [active, params.id, markRead, loadPins]);
 
   // Polling del hilo abierto
   useEffect(() => {
@@ -386,17 +534,36 @@ export default function ChatPage() {
 
   const send = async () => {
     const content = text.trim();
-    if (!content || !active) return;
+    if ((!content && pendingFiles.length === 0) || !active) return;
     setText("");
     const mentions = pendingMentions;
+    const attachments = pendingFiles;
     setPendingMentions({ users: [], notes: [] });
+    setPendingFiles([]);
     nearBottomRef.current = true;
     try {
       const msg = await apiFetch<Msg>(
         `/api/v1/projects/${params.id}/chat/channels/${active.id}/messages`,
-        { method: "POST", body: JSON.stringify({ content, mentions }) }
+        { method: "POST", body: JSON.stringify({ content, mentions, attachments }) }
       );
       setMessages((m) => [...m, msg]);
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
+  const togglePin = async (m: Msg) => {
+    if (!active) return;
+    try {
+      const res = await apiFetch<{ pinned_at: string | null; pinned_by: string | null }>(
+        `/api/v1/projects/${params.id}/chat/channels/${active.id}/messages/${m.id}/pin`,
+        { method: "POST" }
+      );
+      const apply = (list: Msg[]) =>
+        list.map((x) => (x.id === m.id ? { ...x, pinned_at: res.pinned_at, pinned_by: res.pinned_by } : x));
+      setMessages(apply);
+      setThreadReplies(apply);
+      loadPins(active.id);
     } catch (e: any) {
       alert(e.message);
     }
@@ -488,8 +655,33 @@ export default function ChatPage() {
 
   const onTextChange = (value: string) => {
     setText(value);
+    if (value.trim()) pingTyping();
     const match = value.match(/@([\wÁÉÍÓÚáéíóúÑñ]*)$/);
     setMentionFilter(match ? match[1].toLowerCase() : null);
+  };
+
+  // Búsqueda de mensajes con debounce
+  useEffect(() => {
+    const q = searchQ.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    const t = setTimeout(() => {
+      apiFetch<SearchHit[]>(
+        `/api/v1/projects/${params.id}/chat/search?q=${encodeURIComponent(q)}`
+      )
+        .then(setSearchResults)
+        .catch(() => setSearchResults([]));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchQ, params.id]);
+
+  const openSearchHit = (hit: SearchHit) => {
+    const ch = channels.find((c) => c.id === hit.channel_id);
+    setSearchQ("");
+    setSearchResults(null);
+    if (ch) setActive(ch);
   };
 
   const applyMention = (kind: "user" | "note", item: any) => {
@@ -546,6 +738,12 @@ export default function ChatPage() {
           }`}
         >
           {icon} {c.name}
+          {c.kind === "dm" && c.dm_user_id && onlineIds.includes(c.dm_user_id) && (
+            <span
+              title="En línea"
+              className="inline-block ml-1.5 h-2 w-2 rounded-full bg-emerald-500 align-middle"
+            />
+          )}
         </div>
         {!!c.unread_count && (
           <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-primary text-white text-[10px] font-bold flex items-center justify-center">
@@ -573,6 +771,7 @@ export default function ChatPage() {
             canDelete={(mine || canModerate) && !isRoot}
             confirmDelete={confirmDeleteId === m.id}
             onReact={toggleReaction}
+            onPin={togglePin}
             onEdit={mine ? startEdit : undefined}
             onDelete={requestDelete}
           />
@@ -617,6 +816,7 @@ export default function ChatPage() {
             ) : (
               <div className="text-[13px] text-brand-graphite break-words">
                 <MsgMarkdown content={m.content} mine={false} />
+                <AttachmentList list={m.attachments} mine={false} />
               </div>
             )}
             {!m.deleted && <ReactionChips m={m} meId={me?.id} onToggle={toggleReaction} />}
@@ -630,8 +830,45 @@ export default function ChatPage() {
     <div className="grid gap-4 lg:grid-cols-4 h-[74vh]">
       {/* Canales */}
       <div className="card overflow-hidden flex flex-col">
-        <div className="px-4 py-2.5 label !mb-0 border-b border-brand-border">Temas</div>
+        <div className="px-3 py-2 border-b border-brand-border">
+          <input
+            className="input !py-1.5 text-xs"
+            placeholder="🔍 Buscar mensajes…"
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setSearchQ("")}
+          />
+        </div>
+        {searchResults !== null ? (
+          <div className="flex-1 overflow-y-auto">
+            <div className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider2 text-brand-slate border-b border-brand-border/60">
+              {searchResults.length} resultado{searchResults.length === 1 ? "" : "s"}
+            </div>
+            {searchResults.map((hit) => (
+              <button
+                key={hit.id}
+                onClick={() => openSearchHit(hit)}
+                className="w-full text-left px-4 py-2.5 border-b border-brand-border/60 hover:bg-brand-bg-soft"
+              >
+                <div className="text-[10px] font-bold text-brand-cyan">
+                  {hit.channel_kind === "tema" ? `# ${hit.channel_name}` : `💬 ${hit.channel_name}`}
+                  <span className="text-brand-mist font-normal ml-1.5">
+                    {new Date(hit.created_at).toLocaleDateString("es-PY", { day: "numeric", month: "short" })}
+                  </span>
+                </div>
+                <div className="text-xs text-brand-ink">
+                  <span className="font-semibold">{hit.user_name}:</span>{" "}
+                  <span className="text-brand-slate">{hit.content}</span>
+                </div>
+              </button>
+            ))}
+            {searchResults.length === 0 && (
+              <p className="text-center text-xs text-brand-slate pt-8">Sin coincidencias.</p>
+            )}
+          </div>
+        ) : (
         <div className="flex-1 overflow-y-auto">
+          <div className="px-4 py-2.5 label !mb-0 border-b border-brand-border">Temas</div>
           {channels.filter((c) => c.kind === "tema").map((c) => channelButton(c, "#"))}
           <div className="p-2 flex gap-1">
             <input
@@ -669,18 +906,74 @@ export default function ChatPage() {
           )}
           {channels.filter((c) => c.kind === "dm").map((c) => channelButton(c, "💬"))}
         </div>
+        )}
       </div>
 
       {/* Conversación */}
       <div className="lg:col-span-3 card flex flex-col overflow-hidden relative">
         <div className="px-4 py-2.5 border-b border-brand-border flex items-center justify-between">
-          <div className="font-display text-lg uppercase text-brand-ink">
-            {active ? (active.kind === "tema" ? `# ${active.name}` : `💬 ${active.name}`) : "…"}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="font-display text-lg uppercase text-brand-ink truncate">
+              {active ? (active.kind === "tema" ? `# ${active.name}` : `💬 ${active.name}`) : "…"}
+            </div>
+            {active?.kind === "dm" && active.dm_user_id && (
+              <span
+                className={`text-[10px] font-semibold flex items-center gap-1 ${
+                  onlineIds.includes(active.dm_user_id) ? "text-emerald-600" : "text-brand-mist"
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    onlineIds.includes(active.dm_user_id) ? "bg-emerald-500" : "bg-brand-mist/50"
+                  }`}
+                />
+                {onlineIds.includes(active.dm_user_id) ? "en línea" : "ausente"}
+              </span>
+            )}
           </div>
           <span className="text-[11px] text-brand-slate hidden sm:block">
             Mencioná con @ · reaccioná y respondé en hilos al pasar el mouse
           </span>
         </div>
+
+        {/* Mensajes fijados del canal */}
+        {pins.length > 0 && (
+          <div className="relative border-b border-brand-border/60">
+            <button
+              onClick={() => setPinsOpen((v) => !v)}
+              className="w-full text-left px-4 py-1.5 text-[11px] font-semibold text-brand-slate hover:bg-brand-bg-soft flex items-center gap-1.5"
+            >
+              📌 {pins.length} {pins.length === 1 ? "mensaje fijado" : "mensajes fijados"}
+              <span className="text-[8px]">{pinsOpen ? "▲" : "▼"}</span>
+            </button>
+            {pinsOpen && (
+              <div className="absolute top-full left-2 right-2 z-20 glass rounded-xl max-h-64 overflow-y-auto animate-pop">
+                {pins.map((p) => (
+                  <div key={p.id} className="px-3 py-2 border-b border-white/50 last:border-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-brand-ink">
+                        {p.user_name}{" "}
+                        <span className="text-brand-slate font-normal">{hhmm(p.created_at)}</span>
+                        {p.pinned_by && (
+                          <span className="text-brand-slate font-normal"> · fijó {p.pinned_by}</span>
+                        )}
+                      </span>
+                      <button
+                        className="text-[10px] text-brand-primary font-semibold hover:underline shrink-0"
+                        onClick={() => togglePin(p)}
+                      >
+                        Desfijar
+                      </button>
+                    </div>
+                    <div className="text-[12px] text-brand-graphite truncate">
+                      {p.content || (p.attachments?.length ? `📎 ${p.attachments[0].name}` : "")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div ref={msgScrollRef} onScroll={onMsgScroll} className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, i) => {
@@ -733,6 +1026,7 @@ export default function ChatPage() {
                       confirmDelete={confirmDeleteId === m.id}
                       onReact={toggleReaction}
                       onThread={openThread}
+                      onPin={togglePin}
                       onEdit={mine ? startEdit : undefined}
                       onDelete={requestDelete}
                     />
@@ -790,7 +1084,13 @@ export default function ChatPage() {
                               }`
                         }`}
                       >
+                        {m.pinned_at && (
+                          <div className={`text-[9px] font-semibold mb-0.5 ${mine ? "text-white/80" : "text-brand-primary"}`}>
+                            📌 Fijado
+                          </div>
+                        )}
                         <MsgMarkdown content={m.content} mine={mine} />
+                        <AttachmentList list={m.attachments} mine={mine} />
                         {m.mentions?.notes && m.mentions.notes.length > 0 && (
                           <div className="flex gap-1 flex-wrap mt-1.5">
                             {m.mentions.notes.map((n) => (
@@ -845,10 +1145,26 @@ export default function ChatPage() {
           )}
         </div>
 
+        {/* Typing indicator */}
+        <div className="h-5 px-4 flex items-center">
+          {typingNames.length > 0 && (
+            <span className="text-[11px] text-brand-slate italic animate-fade">
+              {typingNames.slice(0, 2).join(" y ")}
+              {typingNames.length > 2 ? ` y ${typingNames.length - 2} más` : ""}{" "}
+              {typingNames.length === 1 ? "está escribiendo" : "están escribiendo"}
+              <span className="inline-flex ml-0.5">
+                <span className="animate-bounce [animation-delay:0ms]">.</span>
+                <span className="animate-bounce [animation-delay:150ms]">.</span>
+                <span className="animate-bounce [animation-delay:300ms]">.</span>
+              </span>
+            </span>
+          )}
+        </div>
+
         {/* Composer con autocompletado de menciones */}
         <div className="border-t border-brand-border p-3 relative">
           {mentionFilter !== null && (filteredUsers.length > 0 || filteredNotes.length > 0) && (
-            <div className="absolute bottom-full left-3 right-3 mb-1 card shadow-elevated max-h-48 overflow-y-auto animate-pop z-10">
+            <div className="absolute bottom-full left-3 right-3 mb-1 glass rounded-xl max-h-48 overflow-y-auto animate-pop z-10">
               {filteredUsers.map((u) => (
                 <button
                   key={u.id}
@@ -870,7 +1186,7 @@ export default function ChatPage() {
             </div>
           )}
           {emojiOpen && (
-            <div className="absolute bottom-full left-3 mb-1 card shadow-elevated p-2 z-20 animate-pop w-72">
+            <div className="absolute bottom-full left-3 mb-1 glass rounded-xl p-2 z-20 animate-pop w-72">
               <div className="grid grid-cols-10 gap-0.5">
                 {EMOJIS.map((e) => (
                   <button
@@ -887,7 +1203,43 @@ export default function ChatPage() {
               </div>
             </div>
           )}
+          {pendingFiles.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap mb-2">
+              {pendingFiles.map((f, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-brand-bg border border-brand-border text-[11px] font-semibold text-brand-ink"
+                >
+                  {fileIcon(f.mime, f.name)} <span className="truncate max-w-[160px]">{f.name}</span>
+                  <span className="text-brand-mist font-normal">{fmtSize(f.size)}</span>
+                  <button
+                    className="text-brand-slate hover:text-brand-primary font-bold"
+                    title="Quitar"
+                    onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.md,.zip"
+              onChange={(e) => uploadFiles(e.target.files)}
+            />
+            <button
+              className="self-end h-10 w-10 shrink-0 rounded-md border border-brand-border bg-white hover:border-brand-primary text-lg leading-none transition-colors disabled:opacity-50"
+              title="Adjuntar archivo"
+              disabled={uploading || pendingFiles.length >= 5}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploading ? "⏳" : "📎"}
+            </button>
             <button
               className={`self-end h-10 w-10 shrink-0 rounded-md border text-xl leading-none transition-colors ${
                 emojiOpen
@@ -913,7 +1265,11 @@ export default function ChatPage() {
                 }
               }}
             />
-            <button className="btn-primary self-end" onClick={send} disabled={!text.trim() || !active}>
+            <button
+              className="btn-primary self-end"
+              onClick={send}
+              disabled={(!text.trim() && pendingFiles.length === 0) || !active || uploading}
+            >
               Enviar
             </button>
           </div>
@@ -954,7 +1310,10 @@ export default function ChatPage() {
                   rows={2}
                   placeholder="Responder en el hilo…"
                   value={threadText}
-                  onChange={(e) => setThreadText(e.target.value)}
+                  onChange={(e) => {
+                    setThreadText(e.target.value);
+                    if (e.target.value.trim()) pingTyping();
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();

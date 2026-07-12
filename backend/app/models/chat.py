@@ -46,6 +46,11 @@ class ChatMessage(Base):
     parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     # Reacciones: {"👍": ["user_id", ...], ...}
     reactions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Adjuntos: [{"name","url","mime","size"}] con URLs de capacidad propias
+    attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Mensaje fijado en el canal (estilo Slack)
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pinned_by: Mapped[str | None] = mapped_column(String(255), nullable=True)  # nombre visible
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

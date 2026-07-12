@@ -105,7 +105,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             </div>
 
             {/* Desktop: barra de pills (identidad Voicenter) */}
-            <nav className="hidden md:flex rounded-lg bg-brand-ink px-2 py-1.5 gap-1 overflow-x-auto scrollbar-thin">
+            <nav className="hidden md:flex rounded-xl glass-ink px-2 py-1.5 gap-1 overflow-x-auto scrollbar-thin">
               {visibleTabs.map((t) => (
                 <Link
                   key={t.href}
@@ -113,7 +113,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                   data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
                   className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider2 transition-colors ${
                     isActive(t.href)
-                      ? "bg-brand-primary text-white"
+                      ? "pill-liquid text-white"
                       : "text-white/70 hover:text-white hover:bg-white/10"
                   }`}
                 >
