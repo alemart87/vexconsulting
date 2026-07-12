@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api";
 const GROUPS = [
   {
     label: "Trabajo",
+    accent: "#E6332A",
     tabs: [
       { href: "", label: "Resumen" },
       { href: "/document", label: "Documento" },
@@ -23,6 +24,7 @@ const GROUPS = [
   },
   {
     label: "Colaboración",
+    accent: "#00B2BF",
     tabs: [
       { href: "/chat", label: "Chat equipo" },
       { href: "/agent", label: "Agente IA" },
@@ -31,6 +33,7 @@ const GROUPS = [
   },
   {
     label: "Control",
+    accent: "#F39200",
     tabs: [
       { href: "/evaluations", label: "Evaluación" },
       { href: "/metrics", label: "Métricas" },
@@ -133,11 +136,17 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                 <div
                   key={g.label}
                   className={`flex flex-col justify-center px-1.5 ${
-                    gi > 0 ? "border-l border-white/10 ml-1.5" : ""
+                    gi > 0 ? "border-l border-white/15 ml-1.5" : ""
                   }`}
                 >
-                  <span className="px-2 pt-0.5 text-[8px] font-bold uppercase tracking-[0.22em] text-white/35 leading-none select-none">
-                    {g.label}
+                  <span className="px-2 pt-0.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] leading-none select-none">
+                    <span
+                      className="h-1.5 w-1.5 rounded-full shrink-0"
+                      style={{ background: g.accent, boxShadow: `0 0 6px ${g.accent}` }}
+                    />
+                    <span style={{ color: g.accent, filter: "brightness(1.6) saturate(0.7)" }}>
+                      {g.label}
+                    </span>
                   </span>
                   <div className="flex gap-1 pt-0.5 pb-0.5">
                     {g.tabs.map((t) => (

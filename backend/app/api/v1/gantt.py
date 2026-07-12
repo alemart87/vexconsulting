@@ -15,6 +15,7 @@ from ...core.database import get_db
 from ...models.document import Document
 from ...models.gantt_task import GANTT_PHASES, GanttTask
 from ...models.note import Note
+from ...models.user import User
 from ..deps import ProjectAccess, require_project_read, require_project_write
 
 router = APIRouter(prefix="/projects/{project_id}/gantt", tags=["gantt"])
@@ -26,6 +27,7 @@ class TaskCreate(BaseModel):
     start_date: date
     end_date: date
     depends_on: Optional[str] = None
+    assignees: Optional[list[str]] = None  # ids de responsables (varios)
 
 
 class TaskUpdate(BaseModel):
@@ -36,13 +38,45 @@ class TaskUpdate(BaseModel):
     progress: Optional[int] = Field(default=None, ge=0, le=100)
     status: Optional[str] = None
     order_index: Optional[int] = None
+    # [] desasigna a todos; None significa «no tocar»
+    assignees: Optional[list[str]] = None
 
 
-def _out(t: GanttTask) -> dict:
+async def _resolve_assignees(db: AsyncSession, ids: list[str] | None) -> list[dict]:
+    """Valida y resuelve [{id, name}] de los responsables (máx. 10, sin duplicados)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for user_id in (ids or [])[:10]:
+        if not user_id or user_id in seen:
+            continue
+        seen.add(user_id)
+        if user_id == "superadmin":
+            out.append({"id": "superadmin", "name": "Superadmin"})
+            continue
+        user = await db.get(User, user_id)
+        if not user:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Un responsable no existe")
+        out.append({"id": user.id, "name": user.full_name})
+    return out
+
+
+def _task_assignees(t: GanttTask) -> list[dict]:
+    if t.assignees:
+        return t.assignees
+    if t.assigned_to:  # dato legado de responsable único
+        return [{"id": t.assigned_to, "name": t.assigned_name or "?"}]
+    return []
+
+
+def _out(t: GanttTask, photos: dict | None = None) -> dict:
+    assignees = [
+        {**a, "photo_url": (photos or {}).get(a.get("id"))} for a in _task_assignees(t)
+    ]
     return {
         "id": t.id, "title": t.title, "phase": t.phase,
         "start_date": str(t.start_date), "end_date": str(t.end_date),
         "progress": t.progress, "status": t.status, "depends_on": t.depends_on,
+        "assignees": assignees,
         "order_index": t.order_index, "generated_by_ai": t.generated_by_ai,
     }
 
@@ -57,7 +91,10 @@ async def list_tasks(
         select(GanttTask).where(GanttTask.project_id == project_id)
         .order_by(GanttTask.order_index, GanttTask.start_date)
     )
-    return [_out(t) for t in result.scalars().all()]
+    photos = {
+        uid: url for uid, url in await db.execute(select(User.id, User.photo_url)) if url
+    }
+    return [_out(t, photos) for t in result.scalars().all()]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -69,6 +106,7 @@ async def create_task(
 ) -> dict:
     if payload.end_date < payload.start_date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La fecha fin no puede ser anterior al inicio")
+    assignees = await _resolve_assignees(db, payload.assignees)
     task = GanttTask(
         project_id=project_id,
         title=payload.title.strip(),
@@ -76,6 +114,7 @@ async def create_task(
         start_date=payload.start_date,
         end_date=payload.end_date,
         depends_on=payload.depends_on,
+        assignees=assignees or None,
         created_by=access.user.id,
     )
     db.add(task)
@@ -99,6 +138,12 @@ async def update_task(
         value = getattr(payload, field)
         if value is not None:
             setattr(task, field, value)
+    if task.end_date < task.start_date:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "La fecha fin no puede ser anterior al inicio")
+    if payload.assignees is not None:  # [] desasigna a todos
+        task.assignees = await _resolve_assignees(db, payload.assignees) or None
+        task.assigned_to = None  # el campo legado deja de mandar
+        task.assigned_name = None
     await db.commit()
     await db.refresh(task)
     return _out(task)

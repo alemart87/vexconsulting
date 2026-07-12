@@ -48,6 +48,9 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("chat_messages", "attachments", "JSON"),
     ("chat_messages", "pinned_at", "TIMESTAMPTZ"),
     ("chat_messages", "pinned_by", "VARCHAR(255)"),
+    ("gantt_tasks", "assignees", "JSON"),
+    ("gantt_tasks", "assigned_to", "VARCHAR(36)"),
+    ("gantt_tasks", "assigned_name", "VARCHAR(255)"),
     ("sources", "embedding_cost_usd", "FLOAT"),
     ("conversations", "role_slug", "VARCHAR(50)"),
 ]

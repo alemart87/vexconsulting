@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, String, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
@@ -27,6 +27,11 @@ class GanttTask(Base):
     end_date: Mapped[date] = mapped_column(Date)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="pendiente")
+    # Responsables: [{"id","name"}] (varios por tarea, nombres denormalizados)
+    assignees: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Legado (una sola persona) — se mantiene por compatibilidad de datos
+    assigned_to: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    assigned_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     depends_on: Mapped[str | None] = mapped_column(String(36), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[str] = mapped_column(String(36))
