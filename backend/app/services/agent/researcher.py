@@ -139,16 +139,19 @@ def build_researcher_agent(project_name: str, rigor: str = "estandar"):
         """Busca en la base de conocimiento interna del proyecto (documentos, planillas,
         imágenes y notas de voz indexados). Devuelve fragmentos con su cita
         [fuente, página/hoja]. Usala SIEMPRE antes de afirmar datos del proyecto."""
+        await ctx.context.report(f"Buscando en las fuentes internas: «{consulta[:90]}»")
         return await buscar_fuentes_impl(ctx.context, consulta, cantidad)
 
     @function_tool
     async def leer_documento_maestro(ctx: RunContextWrapper[AgentContext]) -> dict:
         """Devuelve el contenido actual del documento maestro (el informe en curso)."""
+        await ctx.context.report("Leyendo el documento maestro")
         return await leer_documento_impl(ctx.context)
 
     @function_tool
     async def listar_notas(ctx: RunContextWrapper[AgentContext]) -> dict:
         """Lista las notas del proyecto (hipótesis, hallazgos, tareas) con su estado."""
+        await ctx.context.report("Revisando las notas del proyecto")
         return await listar_notas_impl(ctx.context)
 
     @function_tool
@@ -162,6 +165,10 @@ def build_researcher_agent(project_name: str, rigor: str = "estandar"):
         markdown [Título](url) de la lista `fuentes`."""
         if not settings.perplexity_enabled:
             return {"error": "Perplexity no está configurado en el servidor"}
+        await ctx.context.report(
+            f"Investigando en la web ({'académico' if modo == 'academico' else 'general'}): "
+            f"«{consulta[:90]}»"
+        )
         try:
             if modo == "academico":
                 answer, citations, cost = await _perplexity_academic(consulta)
@@ -214,6 +221,8 @@ def build_researcher_agent(project_name: str, rigor: str = "estandar"):
         import uuid as _uuid
 
         from ...services.chart_service import render_chart_svg, spec_to_markdown_table
+
+        await ctx.context.report(f"Generando gráfico: «{titulo[:70]}»")
 
         if not ctx.context.project_id:
             return {"error": "Sin proyecto activo"}
@@ -287,6 +296,7 @@ def build_researcher_agent(project_name: str, rigor: str = "estandar"):
 async def run_researcher(
     *, project_name: str, project_id: str, user_id: str, user_name: str,
     prompt: str, rigor: str = "estandar", focus_source_ids: list[str] | None = None,
+    on_activity=None,
 ) -> tuple[str, list[dict], float, dict]:
     """Corre el investigador principal.
 
@@ -300,6 +310,7 @@ async def run_researcher(
     context = AgentContext(
         user_id=user_id, user_name=user_name, project_id=project_id,
         agent_type="investigacion", focus_source_ids=focus_source_ids or [],
+        on_activity=on_activity,
     )
     result = await Runner.run(
         agent, input=prompt, context=context, max_turns=settings.agent_max_tool_turns,

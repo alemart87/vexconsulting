@@ -269,6 +269,7 @@ export default function DocumentPage() {
     started_at?: string | null;
     stage_note?: string | null;
     heartbeat_at?: string | null;
+    events?: { t: string; text: string }[];
   }
   const AUTO_ACTIVE = ["pending", "running", "cancelling"];
   const [autoMission, setAutoMission] = useState<AutoMission | null>(null);
@@ -372,14 +373,15 @@ export default function DocumentPage() {
     // ¿El motor da señales de vida? Late cada 15 s: sin latido por >90 s,
     // está muerto o colgado y Cancelar pasa a forzar el corte al instante.
     const hbIso = autoMission.heartbeat_at;
+    const hbAgeS = hbIso
+      ? Math.max(0, Math.floor((Date.now() - parseApiDate(hbIso).getTime()) / 1000))
+      : null;
     const hbStale =
-      autoMission.status !== "pending" &&
-      !!hbIso &&
-      Date.now() - parseApiDate(hbIso).getTime() > 90_000;
+      autoMission.status !== "pending" && hbAgeS != null && hbAgeS > 90;
     if (hbStale) {
       warn =
-        "El motor de investigación no da señales de vida. Tocá Cancelar para " +
-        "forzar el corte y liberar el documento, y relanzá la investigación.";
+        "El motor de investigación no da señales de vida. El sistema lo corta y " +
+        "libera el documento solo en ~1 minuto — o tocá «Forzar corte» ahora.";
     }
     if (autoMission.status === "cancelling") {
       stage = "Cancelando";
@@ -401,8 +403,13 @@ export default function DocumentPage() {
       const k = n || 3;
       eta = `~${Math.ceil(k * 1.5 + 1)}–${Math.ceil(k * 2.5 + 2)} min estimados`;
     }
-    return { pct, stage, detail, elapsed, eta, warn, hbStale };
+    return { pct, stage, detail, elapsed, eta, warn, hbStale, hbAgeS };
   })();
+
+  const agoLabel = (iso: string) => {
+    const s = Math.max(0, Math.floor((Date.now() - parseApiDate(iso).getTime()) / 1000));
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min`;
+  };
 
   const fmtDuration = (seg?: number) => {
     if (seg == null) return "";
@@ -1095,7 +1102,22 @@ export default function DocumentPage() {
               <span className="text-xs font-bold text-brand-cyan">{autoView.stage}</span>
               <span className="text-xs text-white/75 ml-2">{autoView.detail}</span>
             </div>
-            <span className="text-[11px] text-white/50 tabular-nums shrink-0">
+            <span className="text-[11px] text-white/50 tabular-nums shrink-0 flex items-center gap-2">
+              {/* Latido del motor: verde = vivo, ámbar = demorado, rojo = sin señales */}
+              {autoView.hbAgeS != null && (
+                <span className="flex items-center gap-1">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      autoView.hbAgeS <= 45
+                        ? "bg-emerald-400 animate-pulse"
+                        : autoView.hbAgeS <= 90
+                          ? "bg-amber-400"
+                          : "bg-red-500"
+                    }`}
+                  />
+                  latido hace {autoView.hbAgeS} s
+                </span>
+              )}
               {autoView.elapsed} transcurridos · {autoView.eta}
             </span>
           </div>
@@ -1131,6 +1153,32 @@ export default function DocumentPage() {
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Feed de actividad en vivo (estilo Claude Code): cada acción del
+              motor — búsquedas, gráficos, hitos — con su antigüedad */}
+          {(autoMission.events?.length ?? 0) > 0 && (
+            <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
+              {autoMission.events!.slice(-5).map((e, i, arr) => {
+                const last = i === arr.length - 1;
+                return (
+                  <div
+                    key={`${e.t}-${i}`}
+                    className={`flex items-start gap-1.5 text-[11px] leading-snug ${
+                      last ? "text-brand-cyan" : "text-white/45"
+                    }`}
+                  >
+                    <span className="shrink-0">{last ? "▸" : "·"}</span>
+                    <span className={`min-w-0 break-words ${last ? "shimmer-text" : ""}`}>
+                      {e.text}
+                    </span>
+                    <span className="ml-auto shrink-0 tabular-nums text-white/30">
+                      hace {agoLabel(e.t)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
           <div className="text-[10px] text-white/40 mt-1.5">
