@@ -14,29 +14,43 @@ MAX_CONTENT_CHARS = 30_000
 
 _SYSTEM = """Sos el EDITOR responsable del documento maestro de un proyecto de \
 investigación. Te dan el documento completo y un contenido nuevo (hallazgos con \
-citas). Tu trabajo: decidir DÓNDE corresponde cada parte del contenido y cómo \
-integrarla respetando la estructura y el estilo del documento.
+citas). Tu trabajo: dejar el documento COHERENTE Y COMPLETO integrando ese \
+contenido donde corresponde, con precisión de editor humano.
 
-Reglas:
-- Distribuí el contenido entre las secciones EXISTENTES que correspondan (podés \
-dividirlo). Usá el título EXACTO de la sección destino tal como aparece en el \
-documento (sin los #).
-- modo "agregar": el contenido se suma al final de esa sección (lo normal).
-- modo "reemplazar": SOLO si la sección es un placeholder sin contenido real \
-(instrucciones en cursiva tipo «(Completar...)» o «(Redactar al final...)»). \
-Nunca reemplaces contenido sustantivo del documento.
-- Adaptá la redacción para que fluya con lo que ya hay (conectores, sin repetir \
-lo que la sección ya dice, mismo registro sobrio). CONSERVÁ todas las citas y \
-enlaces del contenido nuevo.
-- Solo si de verdad NO existe sección adecuada, creá una: usá "seccion_nueva" \
-con un título breve y "despues_de" con el título de la sección existente tras \
-la cual va.
-- No inventes datos: usá únicamente el contenido provisto.
+Contrato de exactitud (obligatorio):
+- Integrá el 100 % del contenido sustantivo nuevo (cifras, fechas, hallazgos, \
+citas). PROHIBIDO responder que «ya está integrado» o devolver solo referencias: \
+si un dato ya figura pero quedó desactualizado, incompleto o contradictorio, \
+CORREGILO en el lugar exacto con una operación "actualizar".
+- Si el pedido del consultor implica que TODO el documento refleje algo (p. ej. \
+extender el período analizado a 2026), recorré cada sección afectada — títulos, \
+tablas, conclusiones, resúmenes — y emití una operación "actualizar" por cada \
+texto que quedó viejo (p. ej. buscar «2021–2025» y reemplazarlo por «2021–2026»).
+- No inventes datos: usá únicamente el contenido provisto y lo que ya está en \
+el documento.
+
+Operaciones disponibles:
+- "agregar": suma el contenido al FINAL de la sección indicada (título EXACTO \
+tal como aparece, sin los #). Adaptá la redacción para que fluya con lo que ya \
+hay: conectores, sin repetir lo que la sección ya dice, registro sobrio. \
+CONSERVÁ todas las citas y enlaces.
+- "reemplazar": SOLO para secciones placeholder sin contenido real \
+(instrucciones tipo «(Completar...)»). Nunca sobre contenido sustantivo.
+- "actualizar" (edición quirúrgica): {"seccion", "buscar": "<texto EXACTO y \
+único tal como está escrito en el documento, mínimo 8 caracteres>", "contenido": \
+"<texto de reemplazo>"}. Usala para corregir cifras, períodos, títulos de \
+sección desactualizados o afirmaciones que el hallazgo nuevo contradice. El \
+«buscar» debe copiarse LITERAL del documento (misma puntuación y tildes) o la \
+operación no se aplica.
+- "seccion_nueva": SOLO si no existe ninguna sección adecuada. PROHIBIDO crear \
+una sección con título igual o parecido a uno existente (revisá el esquema: si \
+ya hay «Fuentes y método», integrás AHÍ, no creás otra).
 
 Respondé SOLO JSON:
-{"resumen": "<una frase: qué integraste y dónde>",
+{"resumen": "<una frase: qué integraste, qué actualizaste y dónde>",
  "operaciones": [
-   {"seccion": "<título exacto existente>", "modo": "agregar"|"reemplazar", "contenido": "<markdown>"} |
+   {"seccion": "<título existente>", "modo": "agregar"|"reemplazar", "contenido": "<markdown>"} |
+   {"seccion": "<título existente>", "modo": "actualizar", "buscar": "<texto literal>", "contenido": "<reemplazo>"} |
    {"seccion_nueva": "<título>", "despues_de": "<título existente>", "contenido": "<markdown>"}
  ]}"""
 
@@ -77,10 +91,43 @@ def apply_ops(doc_md: str, ops: list[dict]) -> tuple[str, list[str]]:
     applied: list[str] = []
     for op in ops:
         contenido = (op.get("contenido") or "").strip()
+
+        # Edición quirúrgica: reemplaza un texto LITERAL (primero dentro de la
+        # sección indicada; si no aparece ahí, en todo el documento)
+        if op.get("modo") == "actualizar":
+            buscar = str(op.get("buscar") or "")
+            if len(buscar) < 8:
+                continue
+            if "\n" in buscar:  # texto que cruza líneas: reemplazo sobre el texto plano
+                text = "\n".join(lines)
+                if buscar in text:
+                    lines = text.replace(buscar, op.get("contenido") or "", 1).splitlines()
+                    applied.append(f"actualización en {str(op.get('seccion') or 'documento')}")
+                continue
+            loc = _find_section(lines, str(op.get("seccion") or ""))
+            rng = range(loc[0], loc[2]) if loc else range(len(lines))
+            hit = next((i for i in rng if buscar in lines[i]), None)
+            if hit is None:
+                hit = next((i for i in range(len(lines)) if buscar in lines[i]), None)
+            if hit is not None:
+                lines[hit] = lines[hit].replace(buscar, op.get("contenido") or "", 1)
+                applied.append(f"actualización en {str(op.get('seccion') or 'documento')}")
+            elif contenido and loc:
+                # el texto literal no está: al menos el dato entra en la sección
+                lines[loc[2]:loc[2]] = ["", contenido, ""]
+                applied.append(lines[loc[0]].lstrip("# ").strip())
+            continue
+
         if not contenido:
             continue
         if op.get("seccion_nueva"):
             title = str(op["seccion_nueva"]).strip()
+            existing = _find_section(lines, title)
+            if existing:
+                # Nunca duplicar secciones: si ya existe, se integra ahí
+                lines[existing[2]:existing[2]] = ["", contenido, ""]
+                applied.append(lines[existing[0]].lstrip("# ").strip())
+                continue
             after = _find_section(lines, str(op.get("despues_de") or ""))
             block = ["", f"## {title}", "", contenido, ""]
             if after:

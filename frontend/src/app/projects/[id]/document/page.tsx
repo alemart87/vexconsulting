@@ -779,7 +779,17 @@ export default function DocumentPage() {
   // «Insertar donde corresponde»: el agente editor entiende el documento,
   // decide en qué secciones va cada hallazgo y lo integra con criterio.
   const [integrating, setIntegrating] = useState(false);
-  const integrateSmart = async (content: string) => {
+  /** La pregunta del consultor que originó este resultado (contexto de exactitud). */
+  const hintFor = (turn: { id?: string; content: string }) => {
+    const idx = thread.findIndex(
+      (x) => (turn.id && x.id === turn.id) || x.content === turn.content
+    );
+    for (let i = idx - 1; i >= 0; i--) {
+      if (thread[i].role === "user") return thread[i].content.slice(0, 600);
+    }
+    return undefined;
+  };
+  const integrateSmart = async (content: string, hint?: string) => {
     if (integrating) return;
     if (dirty) {
       alert(
@@ -796,7 +806,7 @@ export default function DocumentPage() {
         resumen: string;
       }>(`/api/v1/projects/${params.id}/document/integrate`, {
         method: "POST",
-        body: JSON.stringify({ content, conversation_id: convId || undefined }),
+        body: JSON.stringify({ content, hint, conversation_id: convId || undefined }),
       });
       const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
       setDoc(d);
@@ -1170,7 +1180,10 @@ export default function DocumentPage() {
           )}
           <span>
             {(liveStats?.words ?? doc.word_count).toLocaleString("es-PY")} palabras ·{" "}
-            {Math.max(1, Math.round((liveStats?.words ?? doc.word_count) / 200))} min de
+            <span title="Estimación en formato Word/PDF (~300 palabras por página)">
+              ~{Math.max(1, Math.ceil((liveStats?.words ?? doc.word_count) / 300))} págs.
+            </span>{" "}
+            · {Math.max(1, Math.round((liveStats?.words ?? doc.word_count) / 200))} min de
             lectura ·{" "}
             <Link
               href={`/projects/${params.id}/document/versions`}
@@ -1437,7 +1450,7 @@ export default function DocumentPage() {
                                     className="btn-editorial w-full !py-1 text-xs mt-1.5"
                                     disabled={integrating}
                                     title="El agente editor lee el documento, decide en qué secciones va cada hallazgo y lo integra con el estilo del informe (versión nueva revisable)"
-                                    onClick={() => integrateSmart(t.content)}
+                                    onClick={() => integrateSmart(t.content, hintFor(t))}
                                   >
                                     {integrating ? "Integrando en el documento…" : "Insertar donde corresponde"}
                                   </button>
@@ -1689,82 +1702,9 @@ export default function DocumentPage() {
             )}
           </div>
 
-          {reader && (
-            <div
-              className="fixed inset-0 z-50 bg-brand-ink/60 flex items-start justify-center p-4 md:p-8 animate-fade"
-              onClick={() => setReader(null)}
-            >
-              <div
-                className="card w-full max-w-4xl max-h-[90vh] flex flex-col animate-pop"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center gap-2 flex-wrap px-4 sm:px-6 py-3 border-b border-brand-border">
-                  <span className={engineBadge(reader.engine).cls}>
-                    {engineBadge(reader.engine).label}
-                  </span>
-                  {reader.citations && reader.citations.length > 0 && (
-                    <span className="text-xs text-brand-slate">
-                      {reader.citations.length} fuentes verificables
-                    </span>
-                  )}
-                  <div className="ml-auto flex gap-2">
-                    {editable && (
-                      <>
-                        <button
-                          className="btn-editorial !py-1.5 text-xs"
-                          disabled={integrating}
-                          title="El agente editor decide en qué secciones va cada hallazgo y lo integra con el estilo del informe"
-                          onClick={() => integrateSmart(reader.content)}
-                        >
-                          <span className="hidden sm:inline">
-                            {integrating ? "Integrando…" : "Insertar donde corresponde"}
-                          </span>
-                          <span className="sm:hidden">{integrating ? "…" : "Donde va"}</span>
-                        </button>
-                        <button
-                          className="btn-primary !py-1.5 text-xs"
-                          onClick={() => {
-                            insertText(reader.content);
-                            setReader(null);
-                          }}
-                        >
-                          ⤵ <span className="hidden sm:inline">Insertar en el cursor</span>
-                          <span className="sm:hidden">Insertar</span>
-                        </button>
-                      </>
-                    )}
-                    <button className="btn-ghost !py-1.5 text-xs" onClick={() => setReader(null)}>
-                      ✕ <span className="hidden sm:inline">Cerrar</span>
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-6">
-                  <div className="prose-vex">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{reader.content}</ReactMarkdown>
-                  </div>
-                  {reader.citations && reader.citations.length > 0 && (
-                    <div className="mt-6 rounded-lg border border-brand-border bg-brand-bg-soft p-4">
-                      <div className="label mb-2">Fuentes verificables ({reader.citations.length})</div>
-                      <ol className="space-y-1 list-decimal pl-5">
-                        {reader.citations.map((c, i) => (
-                          <li key={i} className="text-sm">
-                            <a
-                              href={c.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-cyan underline underline-offset-2"
-                            >
-                              {c.title || c.url}
-                            </a>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+          {/* El modo lectura se renderiza al final del componente, FUERA de este
+              aside: position sticky crea un stacking context y el modal quedaba
+              pintado debajo del navbar y de la toolbar del editor. */}
 
           {proposals.length > 0 && (
             <div className="card p-3 space-y-2">
@@ -1793,6 +1733,84 @@ export default function DocumentPage() {
         </aside>
         )}
       </div>
+
+      {/* Modo lectura del investigador (a nivel raíz por stacking context) */}
+      {reader && (
+        <div
+          className="fixed inset-0 z-50 bg-brand-ink/60 flex items-start justify-center p-4 md:p-8 animate-fade"
+          onClick={() => setReader(null)}
+        >
+          <div
+            className="card w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-pop"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 flex-wrap px-4 sm:px-6 py-3 border-b border-brand-border">
+              <span className={engineBadge(reader.engine).cls}>
+                {engineBadge(reader.engine).label}
+              </span>
+              {reader.citations && reader.citations.length > 0 && (
+                <span className="text-xs text-brand-slate">
+                  {reader.citations.length} fuentes verificables
+                </span>
+              )}
+              <div className="ml-auto flex gap-2">
+                {editable && (
+                  <>
+                    <button
+                      className="btn-editorial !py-1.5 text-xs"
+                      disabled={integrating}
+                      title="El agente editor decide en qué secciones va cada hallazgo y lo integra con el estilo del informe"
+                      onClick={() => integrateSmart(reader.content, hintFor(reader))}
+                    >
+                      <span className="hidden sm:inline">
+                        {integrating ? "Integrando…" : "Insertar donde corresponde"}
+                      </span>
+                      <span className="sm:hidden">{integrating ? "…" : "Donde va"}</span>
+                    </button>
+                    <button
+                      className="btn-primary !py-1.5 text-xs"
+                      onClick={() => {
+                        insertText(reader.content);
+                        setReader(null);
+                      }}
+                    >
+                      ⤵ <span className="hidden sm:inline">Insertar en el cursor</span>
+                      <span className="sm:hidden">Insertar</span>
+                    </button>
+                  </>
+                )}
+                <button className="btn-ghost !py-1.5 text-xs" onClick={() => setReader(null)}>
+                  ✕ <span className="hidden sm:inline">Cerrar</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-6">
+              <div className="prose-vex">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{reader.content}</ReactMarkdown>
+              </div>
+              {reader.citations && reader.citations.length > 0 && (
+                <div className="mt-6 rounded-lg border border-brand-border bg-brand-bg-soft p-4">
+                  <div className="label mb-2">Fuentes verificables ({reader.citations.length})</div>
+                  <ol className="space-y-1 list-decimal pl-5">
+                    {reader.citations.map((c, i) => (
+                      <li key={i} className="text-sm">
+                        <a
+                          href={c.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-brand-cyan underline underline-offset-2"
+                        >
+                          {c.title || c.url}
+                        </a>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ⚡ Diálogo del modo automático */}
       {autoDialog && (
