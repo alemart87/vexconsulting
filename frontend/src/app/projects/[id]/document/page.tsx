@@ -401,7 +401,57 @@ export default function DocumentPage() {
       const k = n || 3;
       eta = `~${Math.ceil(k * 1.5 + 1)}–${Math.ceil(k * 2.5 + 2)} min estimados`;
     }
-    return { pct, stage, detail, elapsed, eta, warn, hbStale };
+    // Avance «seccionado»: el recorrido completo siempre a la vista, con la
+    // fase activa girando — el usuario ve qué se hizo, qué corre y qué falta.
+    const note = autoMission.stage_note || "";
+    const doneTasks = steps.filter((s) => s.status === "done").length;
+    const inPrep = note.startsWith("Preparando");
+    const inPlan = note.startsWith("Planificando");
+    const inIntegrate = note.startsWith("Integrando");
+    const inSave = note.startsWith("Guardando");
+    const started = autoMission.status !== "pending";
+    type PhaseState = "done" | "running" | "pending";
+    const phases: { label: string; state: PhaseState }[] = [
+      {
+        label: "Preparación del documento",
+        state: !started ? "pending" : inPrep ? "running" : "done",
+      },
+      {
+        label: "Plan de investigación",
+        state: n ? "done" : inPlan ? "running" : "pending",
+      },
+      ...(n
+        ? steps.map((s) => ({
+            label:
+              s.titulo +
+              (s.status === "done" && s.citas != null ? ` — ${s.citas} citas` : ""),
+            state: (s.status === "done"
+              ? "done"
+              : s.status === "running"
+                ? "running"
+                : "pending") as PhaseState,
+          }))
+        : [
+            {
+              label: "Tareas de investigación (las define el plan)",
+              state: "pending" as PhaseState,
+            },
+          ]),
+      {
+        label: "Integración en el documento",
+        state: inSave
+          ? "done"
+          : inIntegrate || (n > 0 && doneTasks === n)
+            ? "running"
+            : "pending",
+      },
+      { label: "Guardado de la versión nueva", state: inSave ? "running" : "pending" },
+    ];
+    if (inSave) {
+      pct = 97;
+      stage = "Etapa 3 de 3 · Guardado";
+    }
+    return { pct, stage, detail, elapsed, eta, warn, hbStale, phases };
   })();
 
   const fmtDuration = (seg?: number) => {
@@ -1106,33 +1156,30 @@ export default function DocumentPage() {
             </div>
           )}
 
-          {autoMission.steps.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-white/10 grid gap-1 sm:grid-cols-2">
-              {autoMission.steps.map((s, i) => (
-                <div key={i} className="flex items-center gap-2 text-[11px] min-w-0">
-                  {s.status === "done" ? (
-                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-                  ) : s.status === "running" ? (
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-brand-cyan border-t-transparent animate-spin" />
-                  ) : (
-                    <span className="h-2 w-2 shrink-0 rounded-full border border-white/30" />
-                  )}
-                  <span
-                    className={`truncate ${
-                      s.status === "done"
-                        ? "text-white/80"
-                        : s.status === "running"
-                          ? "shimmer-text font-semibold"
-                          : "text-white/40"
-                    }`}
-                  >
-                    {s.titulo}
-                    {s.status === "done" && s.citas != null ? ` — ${s.citas} citas` : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="mt-2 pt-2 border-t border-white/10 grid gap-1 sm:grid-cols-2">
+            {autoView.phases.map((p, i) => (
+              <div key={i} className="flex items-center gap-2 text-[11px] min-w-0">
+                {p.state === "done" ? (
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                ) : p.state === "running" ? (
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-brand-cyan border-t-transparent animate-spin" />
+                ) : (
+                  <span className="h-2 w-2 shrink-0 rounded-full border border-white/30" />
+                )}
+                <span
+                  className={`truncate ${
+                    p.state === "done"
+                      ? "text-white/80"
+                      : p.state === "running"
+                        ? "shimmer-text font-semibold"
+                        : "text-white/40"
+                  }`}
+                >
+                  {p.label}
+                </span>
+              </div>
+            ))}
+          </div>
           <div className="text-[10px] text-white/40 mt-1.5">
             El documento queda bloqueado para edición hasta que termine. Podés navegar a
             cualquier parte: el trabajo corre en el servidor y al final llega una

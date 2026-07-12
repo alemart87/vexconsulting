@@ -339,22 +339,15 @@ async def _log_step_messages(conversation_id: str | None, consulta: str,
         await db.commit()
 
 
-async def _process(mission_id: str) -> None:
-    from ..services.agent.researcher import run_researcher
-
-    await _note(mission_id, "Preparando: tomando el documento y abriendo el hilo de trazabilidad.")
+async def _prepare(mission_id: str) -> tuple | None:
+    """Toma el lock del documento y abre el hilo de trazabilidad. Devuelve el
+    contexto de la misión (o None si la misión ya no existe)."""
     async with session_scope() as db:
         mission = await db.get(AutoMission, mission_id)
         if not mission:
-            return
+            return None
         project = await db.get(Project, mission.project_id)
         doc = await document_service.get_or_create_document(db, mission.project_id)
-        project_id = mission.project_id
-        project_name = project.name if project else "Proyecto"
-        brief = mission.brief
-        requested_by = mission.requested_by
-        requested_by_name = mission.requested_by_name or "consultor"
-        doc_md = doc.content_md or ""
 
         # El agente toma el lock del documento (nadie escribe mientras corre)
         doc.lock_user_id = _agent_lock_id(mission_id)
@@ -363,17 +356,49 @@ async def _process(mission_id: str) -> None:
 
         # Hilo del investigador para trazabilidad y costos
         conv = Conversation(
-            user_id=requested_by, project_id=project_id,
-            agent_type="investigacion", title=f"⚡ Auto · {brief[:52]}",
+            user_id=mission.requested_by, project_id=mission.project_id,
+            agent_type="investigacion", title=f"⚡ Auto · {mission.brief[:52]}",
         )
         db.add(conv)
         await db.flush()
         mission.conversation_id = conv.id
-        conversation_id = conv.id
+        ctx = (
+            mission.project_id,
+            project.name if project else "Proyecto",
+            mission.brief,
+            mission.requested_by,
+            mission.requested_by_name or "consultor",
+            doc.content_md or "",
+            conv.id,
+        )
         await db.commit()
+        return ctx
 
-    renewer = asyncio.create_task(_renew_lock_loop(project_id, mission_id))
+
+async def _process(mission_id: str) -> None:
+    from ..services.agent.researcher import run_researcher
+
+    renewer: asyncio.Task | None = None
+    # TODO el trabajo va dentro del try: si CUALQUIER etapa (incluida la
+    # preparación en DB) falla, la misión termina en «failed» con el motivo —
+    # nunca más una fila «running» huérfana sin explicación.
     try:
+        # 0) PREPARAR (lock + hilo). También con tope: una DB bloqueada no
+        # puede dejar la misión muda.
+        await _note(mission_id, "Preparando: tomando el documento y abriendo el hilo de trazabilidad.")
+        try:
+            ctx = await asyncio.wait_for(_prepare(mission_id), timeout=90)
+        except asyncio.TimeoutError:
+            raise ValueError(
+                "La preparación no respondió en 90 segundos (base de datos "
+                "lenta o bloqueada). Relanzá la investigación."
+            )
+        if ctx is None:
+            return
+        (project_id, project_name, brief, requested_by,
+         requested_by_name, doc_md, conversation_id) = ctx
+        renewer = asyncio.create_task(_renew_lock_loop(project_id, mission_id))
+
         # 1) PLAN (su costo también queda registrado para Costos IA)
         await _note(mission_id, "Planificando: convirtiendo el pedido en tareas (una llamada a OpenAI, tope 3 min).")
         try:
@@ -514,7 +539,8 @@ async def _process(mission_id: str) -> None:
         await _finish(mission_id, status="failed",
                       error=f"La investigación automática falló: {str(exc)[:400]}")
     finally:
-        renewer.cancel()
+        if renewer:
+            renewer.cancel()
 
 
 async def _abort(proc: asyncio.Task) -> None:
@@ -548,9 +574,41 @@ async def _watch_mission(mission_id: str) -> None:
             return
 
 
+async def _sweep_dead_missions() -> None:
+    """Autocuración: misiones «corriendo» sin latido por >3 min (worker muerto,
+    crash sin registrar, fila de un deploy anterior) se cierran solas como
+    fallidas y liberan el documento. Nadie tiene que apretar nada."""
+    try:
+        async with session_scope() as db:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=180)
+            rows = (await db.execute(
+                select(AutoMission).where(AutoMission.status.in_(["running", "cancelling"]))
+            )).scalars().all()
+            changed = False
+            for m in rows:
+                hb = m.heartbeat_at or m.started_at or m.created_at
+                if hb is not None and hb.tzinfo is None:
+                    hb = hb.replace(tzinfo=timezone.utc)
+                if hb is None or hb < cutoff:
+                    m.status = "failed"
+                    m.last_error = (
+                        "El motor quedó sin señales y la misión se cerró sola. "
+                        "Relanzá la investigación."
+                    )
+                    m.finished_at = datetime.now(timezone.utc)
+                    await _release_agent_lock(db, m.project_id, m.id)
+                    logger.warning("Misión %s cerrada por falta de latido", m.id[:8])
+                    changed = True
+            if changed:
+                await db.commit()
+    except Exception:  # pragma: no cover
+        logger.warning("El barrido de misiones sin latido falló")
+
+
 async def auto_worker() -> None:
     logger.info("auto_worker iniciado")
     while True:
+        await _sweep_dead_missions()
         mission_id = await _claim_next()
         if mission_id:
             try:
