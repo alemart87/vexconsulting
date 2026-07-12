@@ -14,7 +14,8 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=3, max_length=300)
     description: Optional[str] = None
     template_slug: Optional[str] = "blank"
-    agent_role_slug: str = "consultor_bpo"
+    # None → la plantilla sugiere el rol (capacitación → diseñador instruccional)
+    agent_role_slug: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):

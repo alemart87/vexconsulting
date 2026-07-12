@@ -165,6 +165,77 @@ Compromisos de la reunión de cierre: quién, qué y para cuándo.
 Listar todas las fuentes citadas con enlace verificable.
 """
 
+_CAPACITACION_MD = """# {name}
+
+**Estado**: borrador · **Tipo**: curso / capacitación · **Modalidad**: *(presencial, virtual en vivo, e-learning, mixta)*
+
+## Resumen ejecutivo
+
+*(Redactar al final: qué problema del negocio resuelve este curso, a quién forma y qué resultado medible se espera.)*
+
+## 1. Ficha del curso
+
+- **Necesidad del negocio que origina la capacitación**: *(ej.: NPS bajo en atención, curva de aprendizaje larga, nuevo producto)*
+- **Resultado esperado en el puesto**: *(qué va a hacer distinto la persona al terminar)*
+- **Solicitante / sponsor**: *(área, nombre, cargo)*
+- **Modalidad y duración total**: *(horas, sesiones, semanas)*
+- **Cupo y grupos**: *(participantes por edición, cantidad de ediciones)*
+- **Fecha objetivo de dictado**: *(completar)*
+
+## 2. Público y prerrequisitos
+
+- **Perfil de los participantes**: *(rol, antigüedad, conocimientos previos)*
+- **Prerrequisitos**: *(qué deben saber o tener antes de empezar)*
+- **Diagnóstico de partida**: *(pre-test, evaluación de desempeño, entrevistas con supervisores)*
+
+## 3. Objetivos de aprendizaje
+
+*(Medibles y observables: «al finalizar, el participante será capaz de…». Cada objetivo se evalúa en la sección 6.)*
+
+1. ...
+2. ...
+
+## 4. Malla curricular
+
+| Módulo | Contenidos | Actividad práctica | Duración | Evaluación |
+| --- | --- | --- | --- | --- |
+| 1. *(nombre)* | | *(role-play, caso, ejercicio)* | | *(quiz, rúbrica, observación)* |
+| 2. | | | | |
+
+## 5. Metodología y materiales
+
+- **Metodología**: *(exposición breve + práctica guiada, microlearning, casos reales de la operación...)*
+- **Materiales a producir**: *(manual del participante, guía del instructor, presentaciones, ejercicios, guiones de role-play)*
+- **Recursos necesarios**: *(sala, plataforma, accesos a sistemas de práctica, instructores)*
+
+## 6. Evaluación y certificación
+
+- **Evaluación de aprendizaje**: *(pre-test / post-test, trabajos prácticos, observación en simulación)*
+- **Criterio de aprobación**: *(nota mínima, asistencia mínima, desempeño en práctica)*
+- **Certificación**: *(quién certifica, vigencia, registro)*
+
+## 7. Plan de sesiones
+
+| Sesión | Fecha | Módulos | Instructor | Grupo |
+| --- | --- | --- | --- | --- |
+| 1 | | | | |
+
+## 8. Medición de impacto (Kirkpatrick)
+
+- **Nivel 1 — Reacción**: encuesta de satisfacción al cierre.
+- **Nivel 2 — Aprendizaje**: comparación pre-test vs. post-test.
+- **Nivel 3 — Transferencia**: observación en el puesto a los 30-60 días *(qué indicador operativo se revisa: calidad, AHT, FCR...)*.
+- **Nivel 4 — Resultados**: impacto en el indicador de negocio que originó el curso.
+
+## 9. Riesgos y supuestos
+
+*(Disponibilidad de participantes en operación, cobertura de la posición durante el curso, accesos a sistemas...)*
+
+## Referencias
+
+Listar bibliografía, normativas y materiales de terceros utilizados, con enlace verificable.
+"""
+
 _BLANK_MD = """# {name}
 
 *(Documento maestro del proyecto.)*
@@ -217,6 +288,30 @@ _TEMPLATES: dict[str, dict] = {
         ],
         "notes": [],
     },
+    "capacitacion_curso": {
+        "label": "Curso / Capacitación",
+        "agent_role": "disenador_instruccional",
+        "content": _CAPACITACION_MD,
+        # Las fases del Gantt reutilizan las etapas existentes; el título de
+        # cada tarea lleva el significado del ciclo formativo.
+        "gantt": [
+            ("Diagnóstico de necesidad y objetivos de aprendizaje", "hipotesis", 0, 5),
+            ("Diseño de la malla curricular y evaluaciones", "hipotesis", 5, 7),
+            ("Producción de materiales (manual, guía del instructor, ejercicios)", "fuentes", 12, 10),
+            ("Convocatoria y logística (grupos, sala/plataforma, accesos)", "fuentes", 15, 7),
+            ("Piloto con grupo de prueba y ajustes", "evidencia", 22, 5),
+            ("Dictado de la capacitación", "sintesis", 27, 10),
+            ("Evaluación, certificación y cierre", "evaluacion", 37, 5),
+            ("Medición de transferencia al puesto (30-60 días)", "evaluacion", 42, 30),
+        ],
+        "notes": [
+            ("Definir objetivos de aprendizaje medibles con el sponsor", "tarea"),
+            ("Validar perfil y disponibilidad de los participantes con el área", "tarea"),
+            ("Preparar pre-test y post-test alineados a los objetivos", "tarea"),
+            ("Confirmar cobertura de las posiciones durante el dictado", "tarea"),
+            ("Definir el indicador operativo que medirá la transferencia (Kirkpatrick N3)", "tarea"),
+        ],
+    },
     "blank": {
         "label": "Documento en blanco",
         "content": _BLANK_MD,
@@ -228,6 +323,12 @@ _TEMPLATES: dict[str, dict] = {
 
 def list_templates() -> list[dict]:
     return [{"slug": slug, "label": t["label"]} for slug, t in _TEMPLATES.items()]
+
+
+def suggested_role(slug: str | None) -> str | None:
+    """Rol del agente acompañante sugerido por la plantilla (o None)."""
+    template = _TEMPLATES.get(slug or "")
+    return template.get("agent_role") if template else None
 
 
 def initial_content(slug: str, project_name: str) -> str:

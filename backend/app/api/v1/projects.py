@@ -85,7 +85,11 @@ async def create_project(
         name=payload.name.strip(),
         description=payload.description,
         template_slug=payload.template_slug or "blank",
-        agent_role_slug=payload.agent_role_slug,
+        # Sin elección explícita, la plantilla sugiere el rol del agente
+        # (ej.: capacitaciones → diseñador instruccional)
+        agent_role_slug=payload.agent_role_slug
+        or template_service.suggested_role(payload.template_slug)
+        or "consultor_bpo",
         owner_id=actor.id,
         owner_name=actor.full_name,
     )
