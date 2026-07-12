@@ -33,7 +33,8 @@ class Notification(Base):
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str | None] = mapped_column(String(500), nullable=True)
     link: Mapped[str | None] = mapped_column(String(300), nullable=True)  # ruta del frontend
-    entity_id: Mapped[str | None] = mapped_column(String(36), nullable=True)  # canal/nota
+    # 64 y no 36: admite ids compuestos (ej. «turno-<uuid>» del pedido de turno = 42).
+    entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # canal/nota
     actor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     count: Mapped[int] = mapped_column(Integer, default=1)  # mensajes agrupados
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

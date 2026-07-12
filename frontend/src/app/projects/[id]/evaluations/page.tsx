@@ -160,7 +160,7 @@ export default function EvaluationsPage() {
               </div>
             ) : (
               <button className="btn-primary w-full" onClick={run} disabled={launching}>
-                {launching ? "Encolando…" : "▶ Evaluar el proyecto"}
+                {launching ? "Iniciando…" : "▶ Evaluar el proyecto"}
               </button>
             )}
           </div>

@@ -141,7 +141,7 @@ async def _claim_next() -> tuple[str, str] | None:
                 expires = expires.replace(tzinfo=timezone.utc)
             if expires > datetime.now(timezone.utc) and not str(doc.lock_user_id).startswith("auto:"):
                 mission.stage_note = (
-                    f"En cola: {doc.lock_user_name or 'otro usuario'} está editando "
+                    f"Esperando: {doc.lock_user_name or 'otro usuario'} está editando "
                     "el documento — arranca en cuanto lo libere."
                 )
                 await db.commit()

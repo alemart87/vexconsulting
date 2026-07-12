@@ -61,6 +61,13 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
 
 # Sentencias idempotentes que corren en cada arranque (solo Postgres).
 MIGRATIONS_IDEMPOTENT: list[str] = [
+    # Ids compuestos superan los 36 chars: «auto:<uuid>» (41) en el lock y la
+    # autoría del modo automático, «turno-<uuid>» (42) en notificaciones.
+    # SQLite no valida largos (por eso en dev nunca falló); Postgres SÍ.
+    "ALTER TABLE documents ALTER COLUMN lock_user_id TYPE VARCHAR(64)",
+    "ALTER TABLE document_versions ALTER COLUMN author_id TYPE VARCHAR(64)",
+    "ALTER TABLE notifications ALTER COLUMN entity_id TYPE VARCHAR(64)",
+    "ALTER TABLE audit_log ALTER COLUMN entity_id TYPE VARCHAR(64)",
     (
         "ALTER TABLE source_chunks ADD COLUMN IF NOT EXISTS tsv tsvector "
         "GENERATED ALWAYS AS (to_tsvector('spanish', content)) STORED"
