@@ -228,8 +228,15 @@ async def ai_costs(
         by_model[model] = by_model.get(model, 0.0) + float(o or 0)
         if p:
             by_model["perplexity/sonar"] = by_model.get("perplexity/sonar", 0.0) + float(p)
-    # Mensajes sin desglose (histórico/asistentes): asignados a OpenAI
-    by_provider["openai"] += max(0.0, messages_total - detailed)
+    # Mensajes sin desglose (histórico/asistentes): asignados a OpenAI y al
+    # modelo del agente (todos los usos internos corren sobre él)
+    from ...core.config import settings as _settings
+
+    _agent_model = _settings.agent_model
+    undetailed = max(0.0, messages_total - detailed)
+    by_provider["openai"] += undetailed
+    if undetailed:
+        by_model[_agent_model] = by_model.get(_agent_model, 0.0) + undetailed
 
     # --- Evaluaciones ---
     eval_row = (await db.execute(
@@ -242,6 +249,7 @@ async def ai_costs(
         by_use["Evaluador"]["usd"] += eval_usd
         by_use["Evaluador"]["consultas"] += eval_count
         by_provider["openai"] += eval_usd
+        by_model[_agent_model] = by_model.get(_agent_model, 0.0) + eval_usd
 
     # --- Edición final APA (auditoría) ---
     final_edit_usd = 0.0
@@ -257,6 +265,7 @@ async def ai_costs(
         by_use.setdefault("Edición final APA", {"usd": 0.0, "consultas": 0})
         by_use["Edición final APA"]["usd"] += final_edit_usd
         by_provider["openai"] += final_edit_usd
+        by_model[_agent_model] = by_model.get(_agent_model, 0.0) + final_edit_usd
 
     # --- Gantt generado con IA (auditoría) ---
     gantt_usd = 0.0
@@ -276,6 +285,7 @@ async def ai_costs(
         by_use["Gantt con IA"]["usd"] += gantt_usd
         by_use["Gantt con IA"]["consultas"] += gantt_count
         by_provider["openai"] += gantt_usd
+        by_model[_agent_model] = by_model.get(_agent_model, 0.0) + gantt_usd
 
     # --- KnowHub (audio, mapas mentales, briefings, FAQ) ---
     from ...models.knowhub import KnowHubItem
@@ -292,9 +302,12 @@ async def ai_costs(
         .where(KnowHubItem.created_at >= since, KnowHubItem.cost_usd.isnot(None))
         .group_by(KnowHubItem.kind, KnowHubItem.created_by, KnowHubItem.project_id)
     )
+    kh_audio = 0.0
     for kind, user_id, project_id, count, usd in kh_rows:
         usd = float(usd or 0)
         kh_total += usd
+        if kind == "audio":
+            kh_audio += usd
         uso = kh_labels.get(kind, f"KnowHub · {kind}")
         by_use.setdefault(uso, {"usd": 0.0, "consultas": 0})
         by_use[uso]["usd"] += usd
@@ -307,6 +320,12 @@ async def ai_costs(
             pname = projects.get(project_id, project_id)
             by_project[pname] = by_project.get(pname, 0.0) + usd
     by_provider["openai"] += kh_total
+    # Audio = guion + voces TTS; el resto del KnowHub corre sobre el agente
+    if kh_audio:
+        tts_model = _settings.knowhub_tts_model
+        by_model[tts_model] = by_model.get(tts_model, 0.0) + kh_audio
+    if kh_total - kh_audio > 0:
+        by_model[_agent_model] = by_model.get(_agent_model, 0.0) + (kh_total - kh_audio)
 
     # --- Embeddings (indexación de fuentes) ---
     emb = float((await db.execute(
@@ -317,6 +336,8 @@ async def ai_costs(
     if emb:
         by_use.setdefault("Indexación de fuentes (embeddings)", {"usd": 0.0, "consultas": 0})
         by_use["Indexación de fuentes (embeddings)"]["usd"] += emb
+        emb_model = _settings.embedding_model
+        by_model[emb_model] = by_model.get(emb_model, 0.0) + emb
 
     total = messages_total + eval_usd + final_edit_usd + gantt_usd + emb + kh_total
     r6 = lambda x: round(float(x), 4)  # noqa: E731

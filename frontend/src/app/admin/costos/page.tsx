@@ -191,7 +191,9 @@ export default function CostosIAPage() {
               )}
               {provider.length > 0 && (
                 <p className="text-[11px] text-brand-slate mt-3">
-                  Los mensajes históricos sin desglose se asignan a OpenAI.
+                  Incluye todos los usos: lo que no reporta modelo se asigna al
+                  modelo del agente; el audio del KnowHub se atribuye a la voz
+                  (TTS) e incluye su guion.
                 </p>
               )}
             </div>
