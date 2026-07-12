@@ -149,6 +149,20 @@ export default function DocumentPage() {
   // ---- UX pro del editor: stats en vivo, guardado visible, outline, enfoque ----
   const [liveStats, setLiveStats] = useState<{ words: number; chars: number } | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [lastSaveAuto, setLastSaveAuto] = useState(false);
+  const [draftFound, setDraftFound] = useState<{ content: string; at: number } | null>(null);
+  const lastEditAtRef = useRef(Date.now());
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const conflictRef = useRef(false);
+  dirtyRef.current = dirty;
+  savingRef.current = saving;
+  conflictRef.current = conflict;
+
+  const handleDirty = useCallback((d: boolean) => {
+    setDirty(d);
+    if (d) lastEditAtRef.current = Date.now();
+  }, []);
   const [, setNowTick] = useState(0); // refresca el «guardado hace X»
   const [focusMode, setFocusMode] = useState(false);
   const [outline, setOutline] = useState<{ text: string; level: number }[]>([]);
@@ -247,6 +261,7 @@ export default function DocumentPage() {
       tareas?: number;
       palabras_agregadas?: number;
       citas?: number;
+      duracion_seg?: number;
     } | null;
     last_error?: string | null;
     requested_by_name?: string | null;
@@ -292,8 +307,68 @@ export default function DocumentPage() {
   useEffect(() => {
     if (!autoActive) return;
     const interval = setInterval(loadAuto, 5000);
-    return () => clearInterval(interval);
+    const clock = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => {
+      clearInterval(interval);
+      clearInterval(clock);
+    };
   }, [autoActive, loadAuto]);
+
+  // Progreso, etapa y tiempos del modo automático (sin magia: 10 % plan,
+  // 82 % repartido entre tareas, 8 % integración; ETA extrapolada del avance)
+  const autoView = (() => {
+    if (!autoMission || !autoActive) return null;
+    const steps = autoMission.steps || [];
+    const n = steps.length;
+    let pct = 2;
+    let stage = "En cola";
+    let detail = "Esperando el turno del motor de investigación (una misión por vez).";
+    if (autoMission.status !== "pending") {
+      if (!n) {
+        pct = 6;
+        stage = "Etapa 1 de 3 · Planificación";
+        detail = "El planificador está convirtiendo el pedido en tareas de investigación concretas.";
+      } else {
+        const done = steps.filter((s) => s.status === "done").length;
+        const running = steps.find((s) => s.status === "running");
+        const share = 82 / n;
+        if (done === n) {
+          pct = 94;
+          stage = "Etapa 3 de 3 · Integración";
+          detail = "Insertando los hallazgos en las secciones destino y guardando la versión nueva.";
+        } else {
+          pct = Math.min(92, Math.round(10 + done * share + (running ? share * 0.5 : 0)));
+          stage = `Etapa 2 de 3 · Investigación — tarea ${Math.min(done + 1, n)} de ${n}`;
+          detail = running
+            ? `«${running.titulo}»${running.seccion ? ` → sección «${running.seccion}»` : ""}`
+            : "Preparando la siguiente tarea…";
+        }
+      }
+    }
+    if (autoMission.status === "cancelling") {
+      stage = "Cancelando";
+      detail = "Cortando entre tareas — el documento no queda a medias.";
+    }
+    const startedIso = autoMission.started_at || autoMission.created_at;
+    const elapsedS = Math.max(0, Math.floor((Date.now() - parseApiDate(startedIso).getTime()) / 1000));
+    const elapsed = `${Math.floor(elapsedS / 60)}:${String(elapsedS % 60).padStart(2, "0")}`;
+    let eta: string;
+    if (pct >= 12 && elapsedS > 20) {
+      const remaining = Math.max(0, Math.round(elapsedS / (pct / 100)) - elapsedS);
+      eta = remaining > 90
+        ? `~${Math.ceil(remaining / 60)} min restantes`
+        : `~${Math.max(15, Math.round(remaining / 15) * 15)} s restantes`;
+    } else {
+      const k = n || 3;
+      eta = `~${Math.ceil(k * 1.5 + 1)}–${Math.ceil(k * 2.5 + 2)} min estimados`;
+    }
+    return { pct, stage, detail, elapsed, eta };
+  })();
+
+  const fmtDuration = (seg?: number) => {
+    if (seg == null) return "";
+    return seg >= 60 ? `${Math.floor(seg / 60)} min ${seg % 60} s` : `${seg} s`;
+  };
 
   const launchAuto = async () => {
     const brief = autoBrief.trim();
@@ -538,7 +613,7 @@ export default function DocumentPage() {
   }, [params.id, editable, doc?.id]);
 
   const save = useCallback(
-    async (force = false) => {
+    async (force = false, auto = false) => {
       if (!doc || !editorRef.current) return;
       setSaving(true);
       setStatus("");
@@ -548,24 +623,77 @@ export default function DocumentPage() {
           body: JSON.stringify({
             content_md: editorRef.current.getMarkdown(),
             base_version_id: doc.current_version_id,
-            summary: summary || undefined,
+            summary: (auto ? summary || "Autoguardado" : summary) || undefined,
             force,
           }),
         });
         setDoc(updated);
         setDirty(false);
         setConflict(false);
-        setSummary("");
+        if (!auto) setSummary("");
         setLastSavedAt(Date.now());
+        setLastSaveAuto(auto);
+        localStorage.removeItem(`vex_draft_${doc.id}`);
       } catch (e: any) {
         if (e.status === 409) setConflict(true);
-        else setStatus(`Error: ${e.message}`);
+        else if (!auto) setStatus(`Error: ${e.message}`);
       } finally {
         setSaving(false);
       }
     },
     [doc, params.id, summary]
   );
+
+  // ---- Autoguardado: borrador local continuo + guardado al servidor
+  // cuando se deja de escribir (nada de perder trabajo) ----
+  useEffect(() => {
+    if (!doc?.id || !editable) return;
+    const interval = setInterval(() => {
+      if (!dirtyRef.current || !editorRef.current) return;
+      try {
+        localStorage.setItem(
+          `vex_draft_${doc.id}`,
+          JSON.stringify({
+            content: editorRef.current.getMarkdown(),
+            base: doc.current_version_id,
+            at: Date.now(),
+          })
+        );
+      } catch {}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [doc?.id, doc?.current_version_id, editable]);
+
+  useEffect(() => {
+    if (!editable) return;
+    const interval = setInterval(() => {
+      if (
+        dirtyRef.current &&
+        !savingRef.current &&
+        !conflictRef.current &&
+        Date.now() - lastEditAtRef.current > 45_000
+      ) {
+        save(false, true);
+      }
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [editable, save]);
+
+  // Borrador huérfano (sesión interrumpida): ofrecer recuperarlo
+  useEffect(() => {
+    if (!doc?.id || !editable) return;
+    try {
+      const raw = localStorage.getItem(`vex_draft_${doc.id}`);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft?.content && draft.content !== doc.content_md) {
+        setDraftFound({ content: draft.content, at: draft.at });
+      } else {
+        localStorage.removeItem(`vex_draft_${doc.id}`);
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, editable]);
 
   // ---- Edición final APA ----
   const finalEditing = doc?.final_edit_status === "running";
@@ -646,6 +774,45 @@ export default function DocumentPage() {
   const insertText = (text: string) => {
     editorRef.current?.insertAtCursor(text);
     setDirty(true);
+  };
+
+  // «Insertar donde corresponde»: el agente editor entiende el documento,
+  // decide en qué secciones va cada hallazgo y lo integra con criterio.
+  const [integrating, setIntegrating] = useState(false);
+  const integrateSmart = async (content: string) => {
+    if (integrating) return;
+    if (dirty) {
+      alert(
+        "Guardá tus cambios antes de integrar con IA: la integración crea una versión nueva del documento en el servidor."
+      );
+      return;
+    }
+    setIntegrating(true);
+    setStatus("");
+    try {
+      const res = await apiFetch<{
+        version_number: number;
+        secciones: string[];
+        resumen: string;
+      }>(`/api/v1/projects/${params.id}/document/integrate`, {
+        method: "POST",
+        body: JSON.stringify({ content, conversation_id: convId || undefined }),
+      });
+      const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
+      setDoc(d);
+      setEditorKey((k) => k + 1);
+      setDirty(false);
+      setReader(null);
+      setStatus(
+        `Integrado con criterio (versión ${res.version_number}) en: ${
+          res.secciones.join(", ") || "el documento"
+        }. Revisá el diff en el historial si querés compararlo.`
+      );
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setIntegrating(false);
+    }
   };
 
   const requestSuggestion = async (instruction: string) => {
@@ -741,46 +908,62 @@ export default function DocumentPage() {
         </div>
       )}
 
-      {/* ⚡ Modo automático en curso: cola + progreso, el documento queda bloqueado */}
-      {autoActive && autoMission && (
+      {/* Modo automático en curso: progreso con %, etapa detallada y ETA */}
+      {autoActive && autoMission && autoView && (
         <div className="rounded-md bg-brand-ink text-white px-4 py-3 text-sm animate-fade">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="h-4 w-4 shrink-0 rounded-full border-2 border-brand-cyan border-t-transparent animate-spin" />
-              <b className="shrink-0">
-                ⚡{" "}
-                {autoMission.status === "pending"
-                  ? "Investigación automática en cola"
-                  : autoMission.status === "cancelling"
-                    ? "Cancelando…"
-                    : "Investigación automática en curso"}
+              <b className="shrink-0 uppercase tracking-wider2 text-xs">
+                Investigación automática
               </b>
-              <span className="text-white/60 text-xs truncate">
-                «{autoMission.brief.slice(0, 90)}»
+              <span className="text-white/50 text-xs truncate">
+                «{autoMission.brief.slice(0, 80)}»
               </span>
             </div>
-            <button
-              className="text-xs px-2.5 py-1 rounded-md border border-white/25 text-white/80 hover:bg-white/10 shrink-0"
-              onClick={cancelAuto}
-              disabled={autoMission.status === "cancelling"}
-            >
-              Cancelar
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="font-display text-2xl leading-none text-brand-cyan tabular-nums">
+                {autoView.pct}%
+              </span>
+              <button
+                className="text-xs px-2.5 py-1 rounded-md border border-white/25 text-white/80 hover:bg-white/10"
+                onClick={cancelAuto}
+                disabled={autoMission.status === "cancelling"}
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
-          <div className="text-[11px] text-white/60 mt-1.5">
-            El documento queda <b>bloqueado</b> hasta que termine. Podés navegar a
-            cualquier parte — el trabajo corre en el servidor y te llega una 🔔 al final.
+
+          {/* Barra de progreso */}
+          <div className="mt-2 h-1.5 rounded-full bg-white/15 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-brand-cyan to-emerald-400 transition-all duration-700"
+              style={{ width: `${autoView.pct}%` }}
+            />
           </div>
+
+          {/* Etapa actual con detalle + tiempos */}
+          <div className="mt-2 flex items-baseline justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-brand-cyan">{autoView.stage}</span>
+              <span className="text-xs text-white/75 ml-2">{autoView.detail}</span>
+            </div>
+            <span className="text-[11px] text-white/50 tabular-nums shrink-0">
+              {autoView.elapsed} transcurridos · {autoView.eta}
+            </span>
+          </div>
+
           {autoMission.steps.length > 0 && (
-            <div className="mt-2 grid gap-1 sm:grid-cols-2">
+            <div className="mt-2 pt-2 border-t border-white/10 grid gap-1 sm:grid-cols-2">
               {autoMission.steps.map((s, i) => (
-                <div key={i} className="flex items-center gap-1.5 text-[11px] min-w-0">
+                <div key={i} className="flex items-center gap-2 text-[11px] min-w-0">
                   {s.status === "done" ? (
-                    <span className="text-emerald-400 shrink-0">✓</span>
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
                   ) : s.status === "running" ? (
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-brand-cyan border-t-transparent animate-spin" />
                   ) : (
-                    <span className="text-white/30 shrink-0">○</span>
+                    <span className="h-2 w-2 shrink-0 rounded-full border border-white/30" />
                   )}
                   <span
                     className={`truncate ${
@@ -792,21 +975,30 @@ export default function DocumentPage() {
                     }`}
                   >
                     {s.titulo}
-                    {s.status === "done" && s.citas != null ? ` · ${s.citas} citas` : ""}
+                    {s.status === "done" && s.citas != null ? ` — ${s.citas} citas` : ""}
                   </span>
                 </div>
               ))}
             </div>
           )}
+          <div className="text-[10px] text-white/40 mt-1.5">
+            El documento queda bloqueado para edición hasta que termine. Podés navegar a
+            cualquier parte: el trabajo corre en el servidor y al final llega una
+            notificación a la campana.
+          </div>
         </div>
       )}
 
       {autoDone && autoDone.status === "done" && (
         <div className="rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm animate-pop">
-          ⚡ <b>Investigación automática completada</b> — versión{" "}
-          {autoDone.result?.version_number}: {autoDone.result?.tareas} investigaciones
-          insertadas, +{autoDone.result?.palabras_agregadas?.toLocaleString("es-PY")}{" "}
-          palabras, {autoDone.result?.citas} citas. El contenido ya está en el editor.
+          <b>Investigación automática completada</b>
+          {autoDone.result?.duracion_seg != null
+            ? ` en ${fmtDuration(autoDone.result.duracion_seg)}`
+            : ""}{" "}
+          — versión {autoDone.result?.version_number}: {autoDone.result?.tareas}{" "}
+          investigaciones insertadas, +
+          {autoDone.result?.palabras_agregadas?.toLocaleString("es-PY")} palabras,{" "}
+          {autoDone.result?.citas} citas. El contenido ya está en el editor.
           <div className="mt-2 flex gap-2 flex-wrap">
             <Link
               href={`/projects/${params.id}/document/versions`}
@@ -822,7 +1014,7 @@ export default function DocumentPage() {
       )}
       {autoDone && autoDone.status === "failed" && (
         <div className="rounded-md bg-brand-primary-light border border-brand-primary/30 px-4 py-2.5 text-sm animate-fade">
-          ⚡ <b>La investigación automática falló:</b> {autoDone.last_error || "error desconocido"}
+          <b>La investigación automática falló:</b> {autoDone.last_error || "error desconocido"}
           <button className="btn-ghost text-xs px-2 py-1 ml-2" onClick={() => setAutoDone(null)}>
             Cerrar
           </button>
@@ -830,10 +1022,39 @@ export default function DocumentPage() {
       )}
       {autoDone && autoDone.status === "cancelled" && (
         <div className="rounded-md bg-brand-bg border border-brand-border px-4 py-2.5 text-sm animate-fade text-brand-slate">
-          ⚡ Investigación automática cancelada — el documento quedó liberado, sin cambios.
+          Investigación automática cancelada — el documento quedó liberado, sin cambios.
           <button className="btn-ghost text-xs px-2 py-1 ml-2" onClick={() => setAutoDone(null)}>
             Cerrar
           </button>
+        </div>
+      )}
+
+      {/* Borrador local sin guardar (sesión interrumpida): recuperación */}
+      {draftFound && (
+        <div className="rounded-md border border-brand-orange/50 bg-brand-orange/10 px-4 py-3 text-sm animate-pop">
+          <b>Hay un borrador sin guardar</b> de{" "}
+          {formatDate(new Date(draftFound.at).toISOString())} (autoguardado local de una
+          sesión interrumpida).
+          <div className="mt-2 flex gap-2 flex-wrap">
+            <button
+              className="btn-primary text-xs px-3 py-1.5"
+              onClick={() => {
+                editorRef.current?.setMarkdown(draftFound.content);
+                setDraftFound(null);
+              }}
+            >
+              Recuperar borrador
+            </button>
+            <button
+              className="btn-ghost text-xs px-3 py-1.5"
+              onClick={() => {
+                if (doc) localStorage.removeItem(`vex_draft_${doc.id}`);
+                setDraftFound(null);
+              }}
+            >
+              Descartar
+            </button>
+          </div>
         </div>
       )}
       {finalEditing && (
@@ -916,6 +1137,7 @@ export default function DocumentPage() {
           {/* Estado de guardado en vivo */}
           {editable && (
             <span
+              title="Autoguardado activo: guarda un borrador local continuo y crea una versión sola cuando dejás de escribir 45 segundos."
               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
                 saving
                   ? "border-brand-cyan/50 text-brand-cyan"
@@ -936,13 +1158,13 @@ export default function DocumentPage() {
               {saving
                 ? "Guardando…"
                 : dirty
-                  ? "Cambios sin guardar"
+                  ? "Cambios sin guardar · auto en 45 s"
                   : lastSavedAt
                     ? `Guardado ${
                         Date.now() - lastSavedAt < 60_000
                           ? "recién"
                           : `hace ${Math.round((Date.now() - lastSavedAt) / 60_000)} min`
-                      }`
+                      }${lastSaveAuto ? " (auto)" : ""}`
                     : "Todo guardado"}
             </span>
           )}
@@ -993,7 +1215,7 @@ export default function DocumentPage() {
                   : "El agente investiga por su cuenta y lo inserta en el documento (cola de fondo)"
               }
             >
-              ⚡ Modo automático
+              Modo automático
             </button>
             <button
               data-tour="edicion-final"
@@ -1076,7 +1298,7 @@ export default function DocumentPage() {
               projectId={params.id}
               initialMarkdown={doc.content_md}
               editable={editable}
-              onDirty={setDirty}
+              onDirty={handleDirty}
               onStats={handleStats}
               zen={focusMode}
               editorRef={editorRef}
@@ -1193,22 +1415,34 @@ export default function DocumentPage() {
                               </ReactMarkdown>
                             </div>
                             {t.status !== "failed" && (
-                              <div className="flex gap-1.5 mt-2">
-                                <button
-                                  className="btn-secondary !py-1 text-xs flex-1"
-                                  onClick={() => setReader(t)}
-                                >
-                                  📖 Leer completo y fuentes
-                                </button>
+                              <>
+                                <div className="flex gap-1.5 mt-2">
+                                  <button
+                                    className="btn-secondary !py-1 text-xs flex-1"
+                                    onClick={() => setReader(t)}
+                                  >
+                                    📖 Leer completo y fuentes
+                                  </button>
+                                  {editable && (
+                                    <button
+                                      className="btn-primary !py-1 text-xs flex-1"
+                                      onClick={() => insertText(t.content)}
+                                    >
+                                      ⤵ Insertar en el cursor
+                                    </button>
+                                  )}
+                                </div>
                                 {editable && (
                                   <button
-                                    className="btn-primary !py-1 text-xs flex-1"
-                                    onClick={() => insertText(t.content)}
+                                    className="btn-editorial w-full !py-1 text-xs mt-1.5"
+                                    disabled={integrating}
+                                    title="El agente editor lee el documento, decide en qué secciones va cada hallazgo y lo integra con el estilo del informe (versión nueva revisable)"
+                                    onClick={() => integrateSmart(t.content)}
                                   >
-                                    ⤵ Insertar
+                                    {integrating ? "Integrando en el documento…" : "Insertar donde corresponde"}
                                   </button>
                                 )}
-                              </div>
+                              </>
                             )}
                           </>
                         )}
@@ -1475,16 +1709,29 @@ export default function DocumentPage() {
                   )}
                   <div className="ml-auto flex gap-2">
                     {editable && (
-                      <button
-                        className="btn-primary !py-1.5 text-xs"
-                        onClick={() => {
-                          insertText(reader.content);
-                          setReader(null);
-                        }}
-                      >
-                        ⤵ <span className="hidden sm:inline">Insertar en el documento</span>
-                        <span className="sm:hidden">Insertar</span>
-                      </button>
+                      <>
+                        <button
+                          className="btn-editorial !py-1.5 text-xs"
+                          disabled={integrating}
+                          title="El agente editor decide en qué secciones va cada hallazgo y lo integra con el estilo del informe"
+                          onClick={() => integrateSmart(reader.content)}
+                        >
+                          <span className="hidden sm:inline">
+                            {integrating ? "Integrando…" : "Insertar donde corresponde"}
+                          </span>
+                          <span className="sm:hidden">{integrating ? "…" : "Donde va"}</span>
+                        </button>
+                        <button
+                          className="btn-primary !py-1.5 text-xs"
+                          onClick={() => {
+                            insertText(reader.content);
+                            setReader(null);
+                          }}
+                        >
+                          ⤵ <span className="hidden sm:inline">Insertar en el cursor</span>
+                          <span className="sm:hidden">Insertar</span>
+                        </button>
+                      </>
                     )}
                     <button className="btn-ghost !py-1.5 text-xs" onClick={() => setReader(null)}>
                       ✕ <span className="hidden sm:inline">Cerrar</span>
@@ -1561,7 +1808,7 @@ export default function DocumentPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="font-display text-xl uppercase text-brand-ink">
-                  ⚡ Modo automático
+                  Modo automático
                 </h2>
                 <p className="text-xs text-brand-slate mt-1 leading-relaxed">
                   Describí <b>qué investigar y qué insertar</b>. El agente arma el plan,
@@ -1593,9 +1840,9 @@ export default function DocumentPage() {
             </div>
 
             <div className="rounded-lg bg-brand-bg/70 border border-brand-border p-3 mt-2 text-[11px] text-brand-slate leading-relaxed space-y-1">
-              <div>🔒 El documento queda <b>bloqueado para edición</b> mientras trabaja.</div>
-              <div>⏳ Entra en <b>cola</b> y corre en el servidor: podés navegar o cerrar la pestaña.</div>
-              <div>📄 El resultado es una <b>versión nueva revisable</b> (el historial compara los cambios) y te avisa con una 🔔.</div>
+              <div><b>Bloqueo:</b> el documento queda cerrado para edición mientras trabaja.</div>
+              <div><b>Cola:</b> corre en el servidor — podés navegar o cerrar la pestaña sin perder nada.</div>
+              <div><b>Resultado:</b> una versión nueva revisable (el historial compara los cambios) y una notificación al terminar, con la duración total.</div>
             </div>
 
             <div className="flex gap-2 mt-4">
@@ -1604,7 +1851,7 @@ export default function DocumentPage() {
                 onClick={launchAuto}
                 disabled={autoBrief.trim().length < 20 || autoLaunching}
               >
-                {autoLaunching ? "Encolando…" : "⚡ Lanzar investigación automática"}
+                {autoLaunching ? "Encolando…" : "Lanzar investigación automática"}
               </button>
               <button className="btn-secondary" onClick={() => setAutoDialog(false)}>
                 Cancelar

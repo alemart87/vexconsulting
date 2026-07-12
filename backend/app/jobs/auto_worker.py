@@ -226,9 +226,15 @@ async def _finish(mission_id: str, *, status: str, result: dict | None = None,
         if not mission:
             return
         mission.status = status
+        finished = datetime.now(timezone.utc)
+        if result is not None and mission.started_at:
+            started = mission.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            result = {**result, "duracion_seg": int((finished - started).total_seconds())}
         mission.result = result
         mission.last_error = error
-        mission.finished_at = datetime.now(timezone.utc)
+        mission.finished_at = finished
         await _release_agent_lock(db, mission.project_id, mission_id)
 
         # Campana al solicitante
@@ -237,19 +243,21 @@ async def _finish(mission_id: str, *, status: str, result: dict | None = None,
 
             link = f"/projects/{mission.project_id}/document"
             if status == "done":
+                dur = (result or {}).get("duracion_seg") or 0
                 title = (
-                    f"⚡ Investigación automática lista · versión "
+                    f"Investigación automática lista · versión "
                     f"{(result or {}).get('version_number', '?')}"
                 )
                 body = (
                     f"{(result or {}).get('tareas', 0)} investigaciones insertadas, "
-                    f"+{(result or {}).get('palabras_agregadas', 0)} palabras."
+                    f"+{(result or {}).get('palabras_agregadas', 0)} palabras, "
+                    f"en {dur // 60} min {dur % 60} s."
                 )
             elif status == "cancelled":
-                title = "⚡ Investigación automática cancelada"
+                title = "Investigación automática cancelada"
                 body = "El documento quedó liberado, sin cambios."
             else:
-                title = "⚡ La investigación automática falló"
+                title = "La investigación automática falló"
                 body = (error or "")[:200]
             await notify(
                 db, recipients={mission.requested_by}, project_id=mission.project_id,
@@ -363,20 +371,51 @@ async def _process(mission_id: str) -> None:
             }
             await _set_steps(mission_id, steps, i + 1)
 
-        # 3) INSERTAR en el documento (determinista) y guardar versión nueva
+        # 3) INTEGRAR con criterio: el agente editor decide dónde va cada
+        # hallazgo dentro de la estructura existente (fallback determinista)
         async with session_scope() as db:
             doc = await document_service.get_or_create_document(db, project_id)
-            new_md = doc.content_md or ""
+            current_md = doc.content_md or ""
+
+        new_md = current_md
+        try:
+            from ..services.agent.integrator import apply_ops, plan_integration
+
+            combined = "\n\n".join(
+                f"## {r['titulo']}\n(Sección sugerida: {r['seccion'] or 'a criterio'})\n\n{r['answer']}"
+                for r in results
+            )
+            ops, integration_summary, int_cost, int_breakdown = await plan_integration(
+                current_md, combined, hint=brief
+            )
+            new_md, _secs = apply_ops(current_md, ops)
+            total_cost += int_cost
+            await _log_step_messages(
+                conversation_id,
+                "[Integración] Editar el documento con criterio e insertar los hallazgos donde corresponden.",
+                f"[Integración en el documento] {integration_summary or ''} · "
+                f"secciones: {', '.join(_secs) or '—'}",
+                [], int_cost,
+                {"openai": int_cost, "perplexity": 0.0, "model": int_breakdown.get("model")},
+            )
+        except Exception:
+            logger.exception(
+                "Integrador falló en misión %s — inserción determinista", mission_id[:8]
+            )
             for r in results:
                 new_md = _insert_into_md(new_md, r["seccion"], r["titulo"], r["answer"])
+
+        # 4) GUARDAR como versión nueva (autoría del agente, revisable)
+        async with session_scope() as db:
+            doc = await document_service.get_or_create_document(db, project_id)
             author = SimpleNamespace(
                 id=_agent_lock_id(mission_id),
-                full_name=f"🤖 Investigación automática · pedida por {requested_by_name}",
+                full_name=f"Investigación automática · pedida por {requested_by_name}",
                 is_superadmin=False,
             )
             version = await document_service.save_document(
                 db, doc, author, content_md=new_md, base_version_id=None,
-                summary=f"⚡ Modo automático: {brief[:120]}", force=True,
+                summary=f"Modo automático: {brief[:120]}", force=True,
             )
             version_number = version.version_number
             words_added = version.words_added

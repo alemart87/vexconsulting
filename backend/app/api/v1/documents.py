@@ -199,6 +199,81 @@ async def request_final_edit(
     return DocumentOut.model_validate(doc)
 
 
+@router.post("/integrate")
+async def integrate_content(
+    project_id: str,
+    payload: dict,
+    request: Request,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """«Insertar donde corresponde»: el agente integrador lee el documento,
+    decide en qué secciones va el contenido investigado y lo edita con
+    criterio. Guarda una versión nueva revisable."""
+    from ...services.agent.integrator import apply_ops, plan_integration
+
+    content = str(payload.get("content") or "").strip()
+    if len(content) < 40:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No hay contenido para integrar")
+
+    doc = await document_service.get_or_create_document(db, project_id)
+    if not (doc.content_md or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El documento está vacío")
+
+    try:
+        ops, resumen, cost, breakdown = await plan_integration(
+            doc.content_md or "", content, hint=str(payload.get("hint") or "") or None
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Integración falló en proyecto %s", project_id[:8])
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"El integrador falló: {str(exc)[:200]}"
+        )
+
+    new_md, secciones = apply_ops(doc.content_md or "", ops)
+    version = await document_service.save_document(
+        db, doc, access.user, content_md=new_md, base_version_id=None,
+        summary=f"Integración con criterio (IA): {(resumen or content[:80])[:400]}",
+        force=True,
+    )
+
+    # Trazabilidad + Costos IA: el paso queda en el hilo del investigador
+    conversation_id = payload.get("conversation_id")
+    if conversation_id:
+        from ...models.conversation import Conversation, Message
+
+        conv = await db.get(Conversation, conversation_id)
+        if conv and conv.project_id == project_id:
+            db.add(Message(
+                conversation_id=conversation_id, role="assistant",
+                content=f"[Integración en el documento] {resumen or ''} · secciones: "
+                        f"{', '.join(secciones) or '—'} · versión {version.version_number}",
+                tool_calls={"status": "done", "engine": "vex", "integracion": True,
+                            "cost_openai": cost, "model": breakdown.get("model")},
+                input_tokens=breakdown.get("input_tokens", 0),
+                cached_tokens=breakdown.get("cached_tokens", 0),
+                output_tokens=breakdown.get("output_tokens", 0),
+                total_tokens=breakdown.get("input_tokens", 0) + breakdown.get("output_tokens", 0),
+                cost_usd=cost,
+            ))
+
+    await log_action(
+        db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
+        action="document.integrate", project_id=project_id, entity_type="version",
+        entity_id=version.id,
+        detail={"version": version.version_number, "secciones": secciones,
+                "cost_usd": round(cost, 4), "resumen": (resumen or "")[:200]},
+        ip=client_ip(request),
+    )
+    await db.commit()
+    return {
+        "version_number": version.version_number,
+        "secciones": secciones,
+        "resumen": resumen,
+        "cost_usd": round(cost, 4),
+    }
+
+
 @router.get("/published", response_model=VersionDetail)
 async def get_published(
     project_id: str,

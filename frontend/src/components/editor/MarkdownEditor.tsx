@@ -27,6 +27,8 @@ interface Props {
 
 export interface EditorHandle {
   getMarkdown: () => string;
+  /** Reemplaza TODO el contenido (recuperación de borradores). Marca dirty. */
+  setMarkdown: (md: string) => void;
   /** Selección actual o texto anterior al cursor (contexto para la IA) + ancla de inserción. */
   getContextInfo: () => { context: string; anchor: number };
   /** Inserta Markdown en la última posición del cursor (con salto de párrafo). */
@@ -125,6 +127,10 @@ export default function MarkdownEditor({
     if (editorRef) {
       editorRef.current = {
         getMarkdown: () => (editor?.storage as any)?.markdown?.getMarkdown() ?? "",
+        setMarkdown: (md: string) => {
+          editor?.commands.setContent(md);
+          onDirty?.(true);
+        },
         getContextInfo: () => {
           if (!editor) return { context: "", anchor: 0 };
           const { from, to } = editor.state.selection;
