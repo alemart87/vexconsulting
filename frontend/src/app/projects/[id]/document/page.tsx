@@ -267,6 +267,8 @@ export default function DocumentPage() {
     requested_by_name?: string | null;
     created_at: string;
     started_at?: string | null;
+    stage_note?: string | null;
+    heartbeat_at?: string | null;
   }
   const AUTO_ACTIVE = ["pending", "running", "cancelling"];
   const [autoMission, setAutoMission] = useState<AutoMission | null>(null);
@@ -334,7 +336,9 @@ export default function DocumentPage() {
         // La barra «respira» durante la planificación (4 → 9 %)
         pct = Math.min(9, 4 + Math.floor(elapsedS0 / 30));
         stage = "Etapa 1 de 3 · Planificación";
-        detail = "El planificador está convirtiendo el pedido en tareas de investigación concretas.";
+        detail =
+          autoMission.stage_note ||
+          "El planificador está convirtiendo el pedido en tareas de investigación concretas.";
         if (elapsedS0 > 200) {
           warn =
             "La planificación está tardando más de lo normal (suele ser una demora " +
@@ -348,7 +352,9 @@ export default function DocumentPage() {
         if (done === n) {
           pct = 94;
           stage = "Etapa 3 de 3 · Integración";
-          detail = "Insertando los hallazgos en las secciones destino y guardando la versión nueva.";
+          detail =
+            autoMission.stage_note ||
+            "Insertando los hallazgos en las secciones destino y guardando la versión nueva.";
         } else {
           pct = Math.min(92, Math.round(10 + done * share + (running ? share * 0.5 : 0)));
           stage = `Etapa 2 de 3 · Investigación — tarea ${Math.min(done + 1, n)} de ${n}`;
@@ -363,10 +369,22 @@ export default function DocumentPage() {
         }
       }
     }
+    // ¿El motor da señales de vida? Late cada 15 s: sin latido por >90 s,
+    // está muerto o colgado y Cancelar pasa a forzar el corte al instante.
+    const hbIso = autoMission.heartbeat_at;
+    const hbStale =
+      autoMission.status !== "pending" &&
+      !!hbIso &&
+      Date.now() - parseApiDate(hbIso).getTime() > 90_000;
+    if (hbStale) {
+      warn =
+        "El motor de investigación no da señales de vida. Tocá Cancelar para " +
+        "forzar el corte y liberar el documento, y relanzá la investigación.";
+    }
     if (autoMission.status === "cancelling") {
       stage = "Cancelando";
       detail = "Cortando la misión — el documento queda liberado en segundos, sin cambios a medias.";
-      warn = null;
+      if (!hbStale) warn = null;
     }
     const startedIso = autoMission.started_at || autoMission.created_at;
     const elapsedS = Math.max(0, Math.floor((Date.now() - parseApiDate(startedIso).getTime()) / 1000));
@@ -383,7 +401,7 @@ export default function DocumentPage() {
       const k = n || 3;
       eta = `~${Math.ceil(k * 1.5 + 1)}–${Math.ceil(k * 2.5 + 2)} min estimados`;
     }
-    return { pct, stage, detail, elapsed, eta, warn };
+    return { pct, stage, detail, elapsed, eta, warn, hbStale };
   })();
 
   const fmtDuration = (seg?: number) => {
@@ -1052,9 +1070,13 @@ export default function DocumentPage() {
               <button
                 className="text-xs px-2.5 py-1 rounded-md border border-white/25 text-white/80 hover:bg-white/10 disabled:opacity-60"
                 onClick={cancelAuto}
-                disabled={autoMission.status === "cancelling"}
+                disabled={autoMission.status === "cancelling" && !autoView.hbStale}
               >
-                {autoMission.status === "cancelling" ? "Cancelando…" : "Cancelar"}
+                {autoView.hbStale
+                  ? "Forzar corte"
+                  : autoMission.status === "cancelling"
+                    ? "Cancelando…"
+                    : "Cancelar"}
               </button>
             </div>
           </div>

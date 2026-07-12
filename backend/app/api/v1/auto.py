@@ -34,6 +34,7 @@ def _out(m: AutoMission) -> dict:
         "requested_by": m.requested_by, "requested_by_name": m.requested_by_name,
         "created_at": m.created_at, "started_at": m.started_at,
         "finished_at": m.finished_at,
+        "stage_note": m.stage_note, "heartbeat_at": m.heartbeat_at,
     }
 
 
@@ -122,7 +123,24 @@ async def cancel_mission(
         mission.status = "cancelled"
         mission.last_error = None
         await db.commit()
-    elif mission.status == "running":
-        mission.status = "cancelling"  # el worker corta entre tareas
+    elif mission.status in ("running", "cancelling"):
+        # ¿El motor sigue vivo? Late cada 15 s. Si el latido tiene más de
+        # 2 minutos, el worker está muerto o colgado: se fuerza el corte acá
+        # mismo y se libera el documento — el botón Cancelar SIEMPRE funciona.
+        from datetime import datetime as _dt2
+
+        hb = mission.heartbeat_at or mission.started_at or mission.created_at
+        if hb is not None and hb.tzinfo is None:
+            hb = hb.replace(tzinfo=timezone.utc)
+        stale = hb is None or (_dt2.now(timezone.utc) - hb).total_seconds() > 120
+        if stale:
+            from ...jobs.auto_worker import _release_agent_lock
+
+            mission.status = "cancelled"
+            mission.last_error = "Cancelada a la fuerza: el motor no daba señales."
+            mission.finished_at = _dt2.now(timezone.utc)
+            await _release_agent_lock(db, project_id, mission.id)
+        else:
+            mission.status = "cancelling"  # el vigilante corta en ≤5 s
         await db.commit()
     return _out(mission)

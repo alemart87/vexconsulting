@@ -34,6 +34,11 @@ class AutoMission(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Hilo del investigador donde quedan los pasos (con tokens y costos)
     conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Sub-etapa exacta en la que está el worker (visible en la UI) y latido:
+    # si heartbeat_at queda viejo, el motor está muerto/colgado y se puede
+    # forzar la cancelación desde el endpoint.
+    stage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     requested_by: Mapped[str] = mapped_column(String(36))
     requested_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

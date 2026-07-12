@@ -71,10 +71,13 @@ async def _release_agent_lock(db, project_id: str, mission_id: str) -> None:
 
 
 async def _renew_lock_loop(project_id: str, mission_id: str) -> None:
-    """Renueva el lock del agente cada 30 s mientras la misión corre."""
+    """Renueva el lock del agente y el latido cada 15 s mientras la misión corre.
+    Si el latido deja de moverse, la UI lo muestra y el endpoint de cancelar
+    permite forzar el corte: nunca más un «colgado» sin salida."""
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
         try:
+            now = datetime.now(timezone.utc)
             async with session_scope() as db:
                 await db.execute(
                     update(Document)
@@ -82,11 +85,30 @@ async def _renew_lock_loop(project_id: str, mission_id: str) -> None:
                         Document.project_id == project_id,
                         Document.lock_user_id == _agent_lock_id(mission_id),
                     )
-                    .values(lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=90))
+                    .values(lock_expires_at=now + timedelta(seconds=90))
+                )
+                await db.execute(
+                    update(AutoMission).where(AutoMission.id == mission_id)
+                    .values(heartbeat_at=now)
                 )
                 await db.commit()
         except Exception:  # pragma: no cover
             logger.warning("No se pudo renovar el lock del modo automático %s", mission_id[:8])
+
+
+async def _note(mission_id: str, text: str) -> None:
+    """Deja registrada la sub-etapa EXACTA (visible en la UI) y en los logs.
+    Si algo se cuelga, la nota dice dónde — se acabó el diagnóstico a ciegas."""
+    logger.info("auto %s · %s", mission_id[:8], text)
+    try:
+        async with session_scope() as db:
+            await db.execute(
+                update(AutoMission).where(AutoMission.id == mission_id)
+                .values(stage_note=text, heartbeat_at=datetime.now(timezone.utc))
+            )
+            await db.commit()
+    except Exception:  # pragma: no cover
+        logger.warning("No se pudo anotar la etapa de la misión %s", mission_id[:8])
 
 
 async def _claim_next() -> str | None:
@@ -138,9 +160,12 @@ async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> tuple[list[
     # Timeout explícito: el default de la librería (600 s × reintentos) dejaba
     # misiones colgadas media hora en «Planificación» ante fallas de red.
     client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=90, max_retries=1)
-    resp = await client.chat.completions.create(
+    kwargs: dict = dict(
         model=settings.agent_model,
         response_format={"type": "json_object"},
+        # Planificar es armar un JSON corto: con esfuerzo de razonamiento alto
+        # el modelo se queda «pensando» minutos. Bajo = respuesta en segundos.
+        reasoning_effort="low",
         messages=[
             {
                 "role": "system",
@@ -165,6 +190,14 @@ async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> tuple[list[
             },
         ],
     )
+    try:
+        resp = await client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        # Si el modelo configurado no acepta reasoning_effort, reintento sin él
+        if "reasoning" not in str(exc).lower():
+            raise
+        kwargs.pop("reasoning_effort", None)
+        resp = await client.chat.completions.create(**kwargs)
     data = _parse_json(resp.choices[0].message.content or "")
     tareas = [t for t in data.get("tareas", []) if t.get("consulta")][:MAX_TASKS]
     if not tareas:
@@ -309,6 +342,7 @@ async def _log_step_messages(conversation_id: str | None, consulta: str,
 async def _process(mission_id: str) -> None:
     from ..services.agent.researcher import run_researcher
 
+    await _note(mission_id, "Preparando: tomando el documento y abriendo el hilo de trazabilidad.")
     async with session_scope() as db:
         mission = await db.get(AutoMission, mission_id)
         if not mission:
@@ -341,6 +375,7 @@ async def _process(mission_id: str) -> None:
     renewer = asyncio.create_task(_renew_lock_loop(project_id, mission_id))
     try:
         # 1) PLAN (su costo también queda registrado para Costos IA)
+        await _note(mission_id, "Planificando: convirtiendo el pedido en tareas (una llamada a OpenAI, tope 3 min).")
         try:
             steps, plan_cost = await asyncio.wait_for(
                 _plan_tasks(brief, project_name, doc_md), timeout=PLAN_TIMEOUT
@@ -369,6 +404,10 @@ async def _process(mission_id: str) -> None:
                 return
             steps[i] = {**step, "status": "running"}
             await _set_steps(mission_id, steps, i)
+            await _note(
+                mission_id,
+                f"Investigando tarea {i + 1} de {len(steps)}: «{step['titulo']}» (tope 10 min).",
+            )
 
             prompt = (
                 f"MODO AUTOMÁTICO — investigás para insertar directo en el informe "
@@ -409,6 +448,7 @@ async def _process(mission_id: str) -> None:
 
         # 3) INTEGRAR con criterio: el agente editor decide dónde va cada
         # hallazgo dentro de la estructura existente (fallback determinista)
+        await _note(mission_id, "Integrando los hallazgos en el documento (tope 5 min).")
         async with session_scope() as db:
             doc = await document_service.get_or_create_document(db, project_id)
             current_md = doc.content_md or ""
@@ -443,6 +483,7 @@ async def _process(mission_id: str) -> None:
                 new_md = _insert_into_md(new_md, r["seccion"], r["titulo"], r["answer"])
 
         # 4) GUARDAR como versión nueva (autoría del agente, revisable)
+        await _note(mission_id, "Guardando la versión nueva del documento.")
         async with session_scope() as db:
             doc = await document_service.get_or_create_document(db, project_id)
             author = SimpleNamespace(
