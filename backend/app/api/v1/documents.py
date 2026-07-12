@@ -25,6 +25,11 @@ logger = logging.getLogger("vexconsulting")
 
 router = APIRouter(prefix="/projects/{project_id}/document", tags=["documents"])
 
+# Presencia en el documento (en memoria, instancia única — como el chat):
+# quién tiene la página abierta AHORA. _DOC_PRESENCE[(project, user)] = (nombre, ts)
+_DOC_PRESENCE: dict[tuple[str, str], tuple[str, float]] = {}
+_DOC_PRESENCE_TTL = 25.0
+
 
 @router.get("", response_model=DocumentOut)
 async def get_document(
@@ -68,6 +73,88 @@ async def save_document(
     )
     await db.refresh(doc)
     return DocumentOut.model_validate(doc)
+
+
+@router.post("/presence")
+async def document_presence(
+    project_id: str,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Latido de presencia: marca que este usuario tiene el documento abierto
+    y devuelve quiénes están AHORA (con foto y quién tiene el lock)."""
+    import time as _time
+
+    from ...models.user import User
+
+    now = _time.monotonic()
+    _DOC_PRESENCE[(project_id, access.user.id)] = (access.user.full_name, now)
+    # Limpieza perezosa de entradas vencidas
+    for key in [k for k, (_, ts) in _DOC_PRESENCE.items() if now - ts > _DOC_PRESENCE_TTL]:
+        _DOC_PRESENCE.pop(key, None)
+
+    doc = await document_service.get_or_create_document(db, project_id)
+    lock_active = bool(
+        doc.lock_user_id and doc.lock_expires_at
+        and (doc.lock_expires_at.replace(tzinfo=timezone.utc)
+             if doc.lock_expires_at.tzinfo is None else doc.lock_expires_at)
+        > datetime.now(timezone.utc)
+    )
+    holder = doc.lock_user_id if lock_active else None
+
+    ids = [uid for (pid, uid), (_, ts) in _DOC_PRESENCE.items()
+           if pid == project_id and now - ts <= _DOC_PRESENCE_TTL]
+    photos: dict[str, str | None] = {}
+    if ids:
+        rows = await db.execute(select(User.id, User.photo_url).where(User.id.in_(ids)))
+        photos = {uid: url for uid, url in rows}
+
+    viewers = [
+        {
+            "user_id": uid,
+            "name": _DOC_PRESENCE[(project_id, uid)][0],
+            "photo_url": photos.get(uid),
+            "editing": uid == holder,
+        }
+        for uid in ids
+    ]
+    # El agente automático también «está» en el documento cuando tiene el lock
+    if holder and str(holder).startswith("auto:"):
+        viewers.append({
+            "user_id": "auto", "name": "Investigación automática",
+            "photo_url": None, "editing": True, "agent": True,
+        })
+    viewers.sort(key=lambda v: (not v["editing"], v["name"] or ""))
+    return {"viewers": viewers}
+
+
+@router.post("/request-edit")
+async def request_edit(
+    project_id: str,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """«Pedir el turno»: avisa por la campana a quien tiene el lock."""
+    doc = await document_service.get_or_create_document(db, project_id)
+    holder = doc.lock_user_id
+    if not holder or holder == access.user.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nadie más está editando ahora")
+    if str(holder).startswith("auto:"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "La investigación automática tiene el documento: esperá a que termine o cancelala",
+        )
+    from ...services.notification_service import notify
+
+    await notify(
+        db, recipients={holder}, project_id=project_id, kind="documento",
+        title=f"{access.user.full_name} quiere editar el documento · {access.project.name}",
+        body="Guardá y cerrá tu turno cuando puedas, o coordiná por el chat.",
+        link=f"/projects/{project_id}/document",
+        entity_id=f"turno-{project_id}", actor_name=access.user.full_name,
+    )
+    await db.commit()
+    return {"ok": True, "holder_name": doc.lock_user_name}
 
 
 @router.post("/lock", response_model=DocumentOut)

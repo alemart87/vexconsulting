@@ -286,6 +286,17 @@ h3,
   to { background-position: 14px 0; }
 }
 
+/* Presencia en el documento: anillo pulsante en quien está editando */
+@keyframes vexPresencePulse {
+  0% { box-shadow: 0 0 0 0 rgba(230, 51, 42, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(230, 51, 42, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(230, 51, 42, 0); }
+}
+.presence-editing {
+  animation: vexPresencePulse 1.8s ease-out infinite;
+  border-radius: 9999px;
+}
+
 /* Mensajes del chat: entrada con rebote sutil (estilo iMessage) */
 @keyframes vexMsgIn {
   0% {

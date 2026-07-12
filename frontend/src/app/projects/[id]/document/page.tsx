@@ -581,6 +581,52 @@ export default function DocumentPage() {
     if (box) box.scrollTop = box.scrollHeight;
   }, [thread, aiLoading]);
 
+  // ---- Presencia en el documento (quién está AHORA, con foto) + turno ----
+  interface Viewer {
+    user_id: string;
+    name: string;
+    photo_url?: string | null;
+    editing: boolean;
+    agent?: boolean;
+  }
+  const [viewers, setViewers] = useState<Viewer[]>([]);
+  const [turnRequested, setTurnRequested] = useState(false);
+  const lastAppliedMdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!doc?.id) return;
+    let stopped = false;
+    const beat = async () => {
+      try {
+        const res = await apiFetch<{ viewers: Viewer[] }>(
+          `/api/v1/projects/${params.id}/document/presence`,
+          { method: "POST" }
+        );
+        if (!stopped) setViewers(res.viewers);
+      } catch {}
+    };
+    beat();
+    const interval = setInterval(beat, 10_000);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, params.id]);
+
+  const requestTurn = async () => {
+    if (turnRequested) return;
+    try {
+      await apiFetch(`/api/v1/projects/${params.id}/document/request-edit`, {
+        method: "POST",
+      });
+      setTurnRequested(true);
+      setTimeout(() => setTurnRequested(false), 60_000);
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   const canWrite =
     project?.my_permission === "write" || project?.my_permission === "admin";
   const lockedByOther =
@@ -590,6 +636,31 @@ export default function DocumentPage() {
     new Date(doc.lock_expires_at) > new Date();
   // Mientras el modo automático trabaja, NADIE escribe (el agente tiene el lock)
   const editable = canWrite && !lockedByOther && !autoActive;
+
+  // ---- Vista EN VIVO: si otro edita (o solo puedo leer), el documento se
+  // refresca solo cada 4 s — ves lo que el otro guarda sin recargar, y el
+  // banner de bloqueo desaparece apenas libera el turno.
+  useEffect(() => {
+    if (!doc?.id || editable) return;
+    lastAppliedMdRef.current = doc.content_md;
+    const interval = setInterval(async () => {
+      try {
+        const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
+        setDoc(d);
+        if (
+          d.content_md !== lastAppliedMdRef.current &&
+          editorRef.current &&
+          !dirtyRef.current
+        ) {
+          editorRef.current.setMarkdownSilent(d.content_md);
+          lastAppliedMdRef.current = d.content_md;
+          requestAnimationFrame(recomputeOutline);
+        }
+      } catch {}
+    }, 4000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, editable, params.id]);
 
   useEffect(() => {
     apiFetch<Doc>(`/api/v1/projects/${params.id}/document`).then(setDoc);
@@ -913,8 +984,30 @@ export default function DocumentPage() {
   return (
     <div className="space-y-3">
       {lockedByOther && !autoActive && (
-        <div className="rounded-md bg-brand-orange/10 border border-brand-orange/40 px-4 py-2.5 text-sm text-brand-graphite animate-fade">
-          ✏️ <b>{doc.lock_user_name}</b> está editando el documento. Se abrió en modo lectura.
+        <div className="rounded-md bg-brand-orange/10 border border-brand-orange/40 px-4 py-2.5 text-sm text-brand-graphite animate-fade flex items-center gap-3 flex-wrap">
+          <span className="min-w-0">
+            <b>{doc.lock_user_name}</b> está editando el documento.
+            <span className="inline-flex items-center gap-1.5 ml-2 text-[11px] font-bold text-brand-primary uppercase tracking-wider2">
+              <span className="h-2 w-2 rounded-full bg-brand-primary animate-pulse" />
+              En vivo
+            </span>
+            <span className="text-brand-slate text-xs ml-1.5">
+              — estás viendo sus cambios a medida que guarda.
+            </span>
+          </span>
+          {canWrite && (
+            <button
+              className={`ml-auto shrink-0 text-xs px-3 py-1.5 rounded-md border font-semibold transition-colors ${
+                turnRequested
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                  : "border-brand-orange/50 bg-white text-brand-graphite hover:border-brand-primary hover:text-brand-primary"
+              }`}
+              onClick={requestTurn}
+              disabled={turnRequested}
+            >
+              {turnRequested ? "Aviso enviado" : "Pedir el turno"}
+            </button>
+          )}
         </div>
       )}
 
@@ -1215,6 +1308,63 @@ export default function DocumentPage() {
           >
             ? Guía
           </button>
+
+          {/* Presencia: quién está AHORA en el documento (foto + estado) */}
+          {viewers.length > 0 && (
+            <div className="flex items-center ml-1" title="Personas en este documento ahora">
+              <div className="flex -space-x-2.5">
+                {viewers.slice(0, 6).map((v) => (
+                  <div
+                    key={v.user_id}
+                    className="relative"
+                    title={`${v.name}${v.user_id === user?.id ? " (vos)" : ""} — ${
+                      v.editing ? "editando ahora" : "viendo el documento"
+                    }`}
+                  >
+                    {v.agent ? (
+                      <div className={`h-8 w-8 rounded-full bg-brand-ink text-brand-cyan flex items-center justify-center text-[9px] font-bold border-2 border-white shadow-soft ${v.editing ? "presence-editing" : ""}`}>
+                        IA
+                      </div>
+                    ) : v.photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={v.photo_url}
+                        alt={v.name}
+                        className={`h-8 w-8 rounded-full object-cover border-2 shadow-soft ${
+                          v.editing ? "border-brand-primary presence-editing" : "border-white"
+                        }`}
+                      />
+                    ) : (
+                      <div
+                        className={`h-8 w-8 rounded-full bg-brand-purple text-white flex items-center justify-center text-xs font-bold border-2 shadow-soft ${
+                          v.editing ? "border-brand-primary presence-editing" : "border-white"
+                        }`}
+                      >
+                        {(v.name || "?").slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    {v.editing ? (
+                      <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-brand-primary border-2 border-white flex items-center justify-center">
+                        <svg viewBox="0 0 24 24" className="h-2 w-2" fill="none" stroke="white" strokeWidth="3">
+                          <path d="M17 3l4 4L8 20l-5 1 1-5L17 3z" />
+                        </svg>
+                      </span>
+                    ) : (
+                      <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-white" />
+                    )}
+                  </div>
+                ))}
+                {viewers.length > 6 && (
+                  <div className="h-8 w-8 rounded-full bg-brand-bg text-brand-slate flex items-center justify-center text-[10px] font-bold border-2 border-white shadow-soft">
+                    +{viewers.length - 6}
+                  </div>
+                )}
+              </div>
+              <span className="ml-2 text-[11px] text-brand-slate">
+                {viewers.length === 1 ? "en el documento" : `${viewers.length} en el documento`}
+              </span>
+            </div>
+          )}
         </div>
         {editable && (
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
