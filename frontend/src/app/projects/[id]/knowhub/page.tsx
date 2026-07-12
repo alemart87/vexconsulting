@@ -64,6 +64,13 @@ function Icon({ name, className = "h-5 w-5" }: { name: string; className?: strin
           <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
         </svg>
       );
+    case "slides":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="13" rx="2" />
+          <path d="M12 17v4M8 21h8M9 9.5l3 2-3 2v-4Z" />
+        </svg>
+      );
     case "refresh":
       return (
         <svg {...common}>
@@ -77,7 +84,7 @@ function Icon({ name, className = "h-5 w-5" }: { name: string; className?: strin
 
 interface Item {
   id: string;
-  kind: "audio" | "mindmap" | "briefing" | "faq";
+  kind: "audio" | "mindmap" | "briefing" | "faq" | "slides";
   status: "running" | "done" | "failed";
   title?: string | null;
   content_md?: string | null;
@@ -555,17 +562,28 @@ export default function KnowHubPage() {
 
   const latest = (kind: Item["kind"]) => items.find((i) => i.kind === kind);
 
-  const generate = async (kind: Item["kind"]) => {
+  const generate = async (kind: Item["kind"], body?: Record<string, unknown>) => {
     setError("");
     try {
       const item = await apiFetch<Item>(`/api/v1/projects/${params.id}/knowhub/${kind}`, {
         method: "POST",
+        body: body ? JSON.stringify(body) : undefined,
       });
       setItems((prev) => [item, ...prev]);
     } catch (e: any) {
       setError(e.message);
     }
   };
+
+  // Presentación: estilo elegido antes de generar
+  const SLIDE_STYLES = [
+    { key: "resumen", label: "Resumen ejecutivo", desc: "8-10 slides, solo lo esencial" },
+    { key: "explicativa", label: "Explicativa", desc: "didáctica, para quien no conoce el proyecto" },
+    { key: "corporativa", label: "Corporativa", desc: "para cliente o directorio" },
+    { key: "personalizada", label: "Personalizada", desc: "vos definís el enfoque" },
+  ] as const;
+  const [slideStyle, setSlideStyle] = useState<string>("corporativa");
+  const [slideInstruction, setSlideInstruction] = useState("");
 
   // El costo se registra pero se consulta en Costos IA — acá solo metadatos de trabajo
   const Meta = ({ it }: { it: Item }) => (
@@ -612,6 +630,8 @@ export default function KnowHubPage() {
   const mindmap = latest("mindmap");
   const briefing = latest("briefing");
   const faq = latest("faq");
+  const slides = latest("slides");
+  const slidesUrl = slides ? `/api/v1/projects/${params.id}/knowhub/${slides.id}/slides` : "";
 
   return (
     <div className="space-y-5">
@@ -699,6 +719,121 @@ export default function KnowHubPage() {
               </>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* ===== Presentación (slides HTML con export a PDF) ===== */}
+      <div className="card p-6 border-t-4" style={{ borderTopColor: "#0F1116" }}>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="font-display text-lg uppercase text-brand-ink flex items-center gap-2">
+              <Icon name="slides" className="h-5 w-5 text-brand-primary" /> Presentación
+            </div>
+            <p className="text-xs text-brand-slate mt-0.5 max-w-2xl">
+              Slides profesionales generadas del informe: navegación por teclado,
+              animaciones y marca Voicenter. Se exporta como HTML autocontenido o a PDF
+              (una slide por página).
+            </p>
+          </div>
+          {canWrite && (
+            <button
+              className="btn-primary !py-1.5 text-xs whitespace-nowrap"
+              disabled={
+                slides?.status === "running" ||
+                (slideStyle === "personalizada" && slideInstruction.trim().length < 12)
+              }
+              onClick={() =>
+                generate("slides", {
+                  style: slideStyle,
+                  instruction: slideStyle === "personalizada" ? slideInstruction.trim() : undefined,
+                })
+              }
+            >
+              {slides ? "Regenerar" : "Generar presentación"}
+            </button>
+          )}
+        </div>
+
+        {/* Instrucción: 3 enfoques predefinidos + personalizada */}
+        {canWrite && (
+          <div className="mt-3">
+            <div className="flex gap-1.5 flex-wrap">
+              {SLIDE_STYLES.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  title={s.desc}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    slideStyle === s.key
+                      ? "bg-brand-ink text-white border-brand-ink"
+                      : "bg-white text-brand-slate border-brand-border hover:border-brand-ink hover:text-brand-ink"
+                  }`}
+                  onClick={() => setSlideStyle(s.key)}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            {slideStyle === "personalizada" && (
+              <textarea
+                className="input mt-2 min-h-[64px] text-sm"
+                placeholder="Describí el enfoque: audiencia, qué destacar, cuántas slides… Ej.: «Para el comité de riesgos: enfocate en la exposición cambiaria 2026, máximo 8 slides»."
+                value={slideInstruction}
+                onChange={(e) => setSlideInstruction(e.target.value)}
+              />
+            )}
+          </div>
+        )}
+
+        <div className="mt-4">
+          {slides?.status === "running" && (
+            <Running text="Armando el contenido y componiendo las slides…" />
+          )}
+          {slides?.status === "failed" && <Failed it={slides} kind="slides" />}
+          {slides?.status === "done" && (
+            <>
+              {/* Vista previa en vivo (la presentación real, embebida) */}
+              <div className="rounded-xl overflow-hidden border border-brand-border shadow-soft bg-brand-ink">
+                <iframe
+                  title="Vista previa de la presentación"
+                  src={slidesUrl}
+                  className="w-full h-[420px] border-0"
+                />
+              </div>
+              <div className="mt-2.5 flex items-center justify-between gap-3 flex-wrap">
+                <Meta it={slides} />
+                <div className="flex gap-3 text-xs">
+                  <a
+                    className="text-brand-cyan font-semibold hover:underline"
+                    href={slidesUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir a pantalla completa
+                  </a>
+                  <a
+                    className="text-brand-cyan font-semibold hover:underline"
+                    href={`${slidesUrl}#print`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Exportar PDF
+                  </a>
+                  <a
+                    className="text-brand-cyan font-semibold hover:underline"
+                    href={`${slidesUrl}?dl=1`}
+                  >
+                    Descargar HTML
+                  </a>
+                </div>
+              </div>
+            </>
+          )}
+          {!slides && (
+            <div className="rounded-xl border-2 border-dashed border-brand-border py-10 text-center text-sm text-brand-slate">
+              Elegí el enfoque y generá la primera presentación del proyecto.
+            </div>
+          )}
         </div>
       </div>
 

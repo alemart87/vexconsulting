@@ -277,9 +277,17 @@ async def generate_faq(db: AsyncSession, project_id: str, project_name: str,
     }
 
 
+def _slides(*args, **kwargs):
+    # import perezoso para evitar el ciclo knowhub_service <-> slides_service
+    from .slides_service import generate_slides
+
+    return generate_slides(*args, **kwargs)
+
+
 GENERATORS = {
     "audio": generate_audio,
     "mindmap": generate_mindmap,
     "briefing": generate_briefing,
     "faq": generate_faq,
+    "slides": _slides,
 }

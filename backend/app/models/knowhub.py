@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
 
-KNOWHUB_KINDS = ("audio", "mindmap", "briefing", "faq")
+KNOWHUB_KINDS = ("audio", "mindmap", "briefing", "faq", "slides")
 
 
 def _uuid() -> str:

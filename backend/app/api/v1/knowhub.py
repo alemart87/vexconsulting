@@ -10,8 +10,8 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,10 +27,11 @@ logger = logging.getLogger("vexconsulting")
 router = APIRouter(tags=["knowhub"])
 
 KIND_LABELS = {
-    "audio": "🎧 Resumen de audio",
-    "mindmap": "🧠 Mapa mental",
-    "briefing": "📋 Briefing ejecutivo",
-    "faq": "❓ Preguntas frecuentes",
+    "audio": "Resumen de audio",
+    "mindmap": "Mapa mental",
+    "briefing": "Briefing ejecutivo",
+    "faq": "Preguntas frecuentes",
+    "slides": "Presentación",
 }
 
 
@@ -61,12 +62,14 @@ async def list_items(
 
 async def _generate_job(item_id: str, kind: str, project_id: str,
                         project_name: str, description: str | None,
-                        user_info: dict) -> None:
+                        user_info: dict, options: dict | None = None) -> None:
     error: str | None = None
     result: dict = {}
     try:
         async with session_scope() as db:
-            result = await GENERATORS[kind](db, project_id, project_name, description)
+            result = await GENERATORS[kind](
+                db, project_id, project_name, description, **(options or {})
+            )
     except Exception as exc:  # noqa: BLE001
         logger.exception("KnowHub %s falló en proyecto %s", kind, project_id[:8])
         error = str(exc)[:400]
@@ -119,11 +122,27 @@ async def generate(
     project_id: str,
     kind: str,
     request: Request,
+    payload: dict | None = Body(default=None),
     access: ProjectAccess = Depends(require_project_write),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     if kind not in KNOWHUB_KINDS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Tipo inválido: {kind}")
+
+    options: dict = {}
+    if kind == "slides":
+        from ...services.slides_service import SLIDE_STYLES
+
+        style = str((payload or {}).get("style") or "corporativa")
+        if style not in SLIDE_STYLES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Estilo inválido: {style}")
+        instruction = str((payload or {}).get("instruction") or "").strip()[:1500]
+        if style == "personalizada" and len(instruction) < 12:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Describí qué presentación necesitás (mínimo 12 caracteres)",
+            )
+        options = {"style": style, "instruction": instruction or None}
     running = (await db.execute(
         select(KnowHubItem).where(
             KnowHubItem.project_id == project_id,
@@ -154,6 +173,7 @@ async def generate(
         access.project.description,
         {"id": access.user.id, "name": access.user.full_name,
          "email": access.user.email, "role": access.user.role},
+        options,
     ))
     return _out(item)
 
@@ -173,6 +193,27 @@ async def delete_item(
     await db.delete(item)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/projects/{project_id}/knowhub/{item_id}/slides")
+async def view_slides(
+    project_id: str, item_id: str, dl: int = 0, db: AsyncSession = Depends(get_db)
+):
+    """La presentación HTML autocontenida (URL-capacidad, igual que el audio).
+    Con ?dl=1 se descarga como archivo; con #print imprime al abrir (PDF)."""
+    item = await db.get(KnowHubItem, item_id)
+    if (not item or item.project_id != project_id or item.kind != "slides"
+            or not item.file_path or not Path(item.file_path).exists()):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Presentación no disponible")
+    if dl:
+        return FileResponse(
+            item.file_path, media_type="text/html",
+            filename=f"presentacion-v{item.version}.html",
+        )
+    return HTMLResponse(
+        Path(item.file_path).read_text(encoding="utf-8"),
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.get("/projects/{project_id}/knowhub/{item_id}/audio")
