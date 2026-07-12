@@ -10,6 +10,7 @@ interface Version {
   version_number: number;
   summary?: string;
   author_name: string;
+  author_photo_url?: string | null;
   word_count: number;
   words_added: number;
   words_removed: number;

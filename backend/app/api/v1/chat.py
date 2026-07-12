@@ -2,16 +2,16 @@
 con menciones a miembros (@usuario) y a notas de seguimiento (@nota)."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
-from ...models.chat import ChatChannel, ChatMessage
+from ...models.chat import ChatChannel, ChatMessage, ChatRead
 from ...models.note import Note
 from ...models.project_member import ProjectMember
 from ...models.user import User
@@ -31,6 +31,35 @@ class ChannelCreate(BaseModel):
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
     mentions: Optional[dict] = None  # {"users": [...], "notes": [...]}
+    parent_id: Optional[str] = None  # respuesta en hilo
+
+
+class MessageEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class ReactionToggle(BaseModel):
+    emoji: str = Field(min_length=1, max_length=16)
+
+
+def _msg_out(m: ChatMessage, photos: dict, reply_counts: dict | None = None) -> dict:
+    deleted = m.deleted_at is not None
+    return {
+        "id": m.id, "user_id": m.user_id, "user_name": m.user_name,
+        "user_photo_url": photos.get(m.user_id),
+        "content": "" if deleted else m.content,
+        "deleted": deleted,
+        "mentions": None if deleted else m.mentions,
+        "parent_id": m.parent_id,
+        "reactions": m.reactions or {},
+        "edited_at": m.edited_at,
+        "reply_count": (reply_counts or {}).get(m.id, 0),
+        "created_at": m.created_at,
+    }
+
+
+async def _user_photos(db: AsyncSession) -> dict:
+    return {uid: url for uid, url in await db.execute(select(User.id, User.photo_url)) if url}
 
 
 def _require_chat_access(access: ProjectAccess) -> None:
@@ -54,17 +83,36 @@ async def _channel_out(db: AsyncSession, ch: ChatChannel, me_id: str) -> dict:
                 name = other.full_name if other else name
     last = await db.execute(
         select(ChatMessage.content, ChatMessage.created_at)
-        .where(ChatMessage.channel_id == ch.id)
+        .where(ChatMessage.channel_id == ch.id, ChatMessage.deleted_at.is_(None))
         .order_by(ChatMessage.created_at.desc())
         .limit(1)
     )
     row = last.first()
+
+    # No leídos: mensajes raíz ajenos posteriores a la última lectura
+    last_read = (await db.execute(
+        select(ChatRead.last_read_at).where(
+            ChatRead.channel_id == ch.id, ChatRead.user_id == me_id
+        )
+    )).scalar_one_or_none()
+    unread_q = select(func.count(ChatMessage.id)).where(
+        ChatMessage.channel_id == ch.id,
+        ChatMessage.user_id != me_id,
+        ChatMessage.deleted_at.is_(None),
+        ChatMessage.parent_id.is_(None),
+    )
+    if last_read:
+        unread_q = unread_q.where(ChatMessage.created_at > last_read)
+    unread = (await db.execute(unread_q)).scalar_one() or 0
+
     return {
         "id": ch.id,
         "kind": ch.kind,
         "name": name,
         "last_message": (row.content[:80] if row else None),
         "last_at": (row.created_at if row else ch.created_at),
+        "unread_count": int(unread),
+        "last_read_at": last_read,
     }
 
 
@@ -173,7 +221,10 @@ async def list_messages(
     _require_chat_access(access)
     await _get_channel(db, project_id, channel_id, access.user.id)
 
-    query = select(ChatMessage).where(ChatMessage.channel_id == channel_id)
+    # Solo mensajes raíz: las respuestas viven en su hilo
+    query = select(ChatMessage).where(
+        ChatMessage.channel_id == channel_id, ChatMessage.parent_id.is_(None)
+    )
     if after:
         try:
             after_dt = datetime.fromisoformat(after.replace("Z", "+00:00"))
@@ -182,18 +233,139 @@ async def list_messages(
             pass
     result = await db.execute(query.order_by(ChatMessage.created_at.desc()).limit(limit))
     messages = list(reversed(result.scalars().all()))
-    # Foto de perfil de cada remitente
-    photos = {
-        uid: url for uid, url in await db.execute(select(User.id, User.photo_url)) if url
+    photos = await _user_photos(db)
+    counts = {
+        pid: int(n) for pid, n in await db.execute(
+            select(ChatMessage.parent_id, func.count(ChatMessage.id))
+            .where(
+                ChatMessage.channel_id == channel_id,
+                ChatMessage.parent_id.isnot(None),
+                ChatMessage.deleted_at.is_(None),
+            )
+            .group_by(ChatMessage.parent_id)
+        )
     }
-    return [
-        {
-            "id": m.id, "user_id": m.user_id, "user_name": m.user_name,
-            "user_photo_url": photos.get(m.user_id),
-            "content": m.content, "mentions": m.mentions, "created_at": m.created_at,
-        }
-        for m in messages
-    ]
+    return [_msg_out(m, photos, counts) for m in messages]
+
+
+@router.get("/channels/{channel_id}/messages/{message_id}/thread")
+async def get_thread(
+    project_id: str,
+    channel_id: str,
+    message_id: str,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """El hilo: mensaje raíz + respuestas en orden cronológico."""
+    _require_chat_access(access)
+    await _get_channel(db, project_id, channel_id, access.user.id)
+    root = await db.get(ChatMessage, message_id)
+    if not root or root.channel_id != channel_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensaje no encontrado")
+    replies = (await db.execute(
+        select(ChatMessage).where(ChatMessage.parent_id == message_id)
+        .order_by(ChatMessage.created_at)
+    )).scalars().all()
+    photos = await _user_photos(db)
+    alive = sum(1 for r in replies if r.deleted_at is None)
+    return {
+        "root": _msg_out(root, photos, {root.id: alive}),
+        "replies": [_msg_out(r, photos) for r in replies],
+    }
+
+
+@router.post("/channels/{channel_id}/read")
+async def mark_channel_read(
+    project_id: str,
+    channel_id: str,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Marca el canal como leído (badges de no leídos)."""
+    _require_chat_access(access)
+    await _get_channel(db, project_id, channel_id, access.user.id)
+    existing = (await db.execute(
+        select(ChatRead).where(
+            ChatRead.channel_id == channel_id, ChatRead.user_id == access.user.id
+        )
+    )).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if existing:
+        existing.last_read_at = now
+    else:
+        db.add(ChatRead(channel_id=channel_id, user_id=access.user.id, last_read_at=now))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.patch("/channels/{channel_id}/messages/{message_id}")
+async def edit_message(
+    project_id: str,
+    channel_id: str,
+    message_id: str,
+    payload: MessageEdit,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    _require_chat_access(access)
+    m = await db.get(ChatMessage, message_id)
+    if not m or m.channel_id != channel_id or m.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensaje no encontrado")
+    if m.user_id != access.user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el autor puede editar su mensaje")
+    m.content = payload.content.strip()
+    m.edited_at = datetime.now(timezone.utc)
+    await db.commit()
+    photos = await _user_photos(db)
+    return _msg_out(m, photos)
+
+
+@router.delete("/channels/{channel_id}/messages/{message_id}")
+async def delete_message(
+    project_id: str,
+    channel_id: str,
+    message_id: str,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    _require_chat_access(access)
+    m = await db.get(ChatMessage, message_id)
+    if not m or m.channel_id != channel_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensaje no encontrado")
+    if m.user_id != access.user.id and access.permission != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el autor (o un admin) puede borrar")
+    m.deleted_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/channels/{channel_id}/messages/{message_id}/reactions")
+async def toggle_reaction(
+    project_id: str,
+    channel_id: str,
+    message_id: str,
+    payload: ReactionToggle,
+    access: ProjectAccess = Depends(require_project_read),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Agrega o quita (toggle) la reacción del usuario sobre el mensaje."""
+    _require_chat_access(access)
+    m = await db.get(ChatMessage, message_id)
+    if not m or m.channel_id != channel_id or m.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensaje no encontrado")
+    reactions = dict(m.reactions or {})
+    users = list(reactions.get(payload.emoji, []))
+    if access.user.id in users:
+        users.remove(access.user.id)
+    else:
+        users.append(access.user.id)
+    if users:
+        reactions[payload.emoji] = users
+    else:
+        reactions.pop(payload.emoji, None)
+    m.reactions = reactions
+    await db.commit()
+    return {"reactions": reactions}
 
 
 @router.post("/channels/{channel_id}/messages", status_code=status.HTTP_201_CREATED)
@@ -207,6 +379,15 @@ async def send_message(
     _require_chat_access(access)
     channel = await _get_channel(db, project_id, channel_id, access.user.id)
 
+    # Respuesta en hilo: validar que el padre exista en este canal
+    parent: ChatMessage | None = None
+    if payload.parent_id:
+        parent = await db.get(ChatMessage, payload.parent_id)
+        if not parent or parent.channel_id != channel_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "El hilo no existe")
+        if parent.parent_id:
+            parent = await db.get(ChatMessage, parent.parent_id)  # un solo nivel
+
     message = ChatMessage(
         channel_id=channel_id,
         project_id=project_id,
@@ -214,10 +395,11 @@ async def send_message(
         user_name=access.user.full_name,
         content=payload.content.strip(),
         mentions=payload.mentions,
+        parent_id=parent.id if parent else None,
     )
     db.add(message)
 
-    # --- Notificaciones (campana): menciones > directo > tema ---
+    # --- Notificaciones (campana): menciones > hilo > directo > tema ---
     author = access.user
     preview = f"{author.full_name}: {message.content[:120]}"
     link = f"/projects/{project_id}/chat?channel={channel_id}"
@@ -232,7 +414,16 @@ async def send_message(
             body=message.content[:200], link=link, entity_id=channel_id,
             actor_name=author.full_name,
         )
-    if channel.kind == "dm":
+    if parent:
+        # En un hilo solo se avisa al autor del mensaje raíz (no a todo el canal)
+        await notify(
+            db, recipients={parent.user_id} - {author.id} - mentioned,
+            project_id=project_id, kind="chat",
+            title=f"{author.full_name} respondió en tu hilo · #{channel.name}",
+            body=message.content[:200], link=link, entity_id=parent.id,
+            actor_name=author.full_name,
+        )
+    elif channel.kind == "dm":
         others = set((channel.dm_key or "").split("|")) - {author.id} - mentioned
         await notify(
             db, recipients=others, project_id=project_id, kind="chat",
@@ -251,12 +442,7 @@ async def send_message(
 
     await db.commit()
     await db.refresh(message)
-    return {
-        "id": message.id, "user_id": message.user_id, "user_name": message.user_name,
-        "user_photo_url": access.user.photo_url,
-        "content": message.content, "mentions": message.mentions,
-        "created_at": message.created_at,
-    }
+    return _msg_out(message, {author.id: author.photo_url})
 
 
 @router.get("/mentionables")

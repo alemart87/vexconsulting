@@ -42,4 +42,21 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     # {"users": [{"id","name"}], "notes": [{"id","title"}]}
     mentions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Hilos: respuesta a un mensaje raíz del canal
+    parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Reacciones: {"👍": ["user_id", ...], ...}
+    reactions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatRead(Base):
+    """Última lectura de cada usuario por canal (badges de no leídos)."""
+    __tablename__ = "chat_reads"
+    __table_args__ = (UniqueConstraint("channel_id", "user_id", name="uq_chat_read"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    channel_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    last_read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
