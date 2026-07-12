@@ -24,7 +24,8 @@ class Document(Base):
     content_md: Mapped[str] = mapped_column(Text, default="")
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     # Lock blando de edición: TTL renovable; expirado = libre.
-    lock_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # 64 y no 36: también guarda el id del agente automático («auto:<uuid>» = 41).
+    lock_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lock_user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     lock_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Edición final APA (job de fondo): None | running | done | failed

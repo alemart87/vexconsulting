@@ -329,8 +329,8 @@ export default function DocumentPage() {
       Math.floor((Date.now() - parseApiDate(startedIso0).getTime()) / 1000)
     );
     let pct = 2;
-    let stage = "En cola";
-    let detail = "Esperando el turno del motor de investigación (una misión por vez).";
+    let stage = "Arrancando";
+    let detail = "El motor de investigación está tomando la misión (una por vez).";
     let warn: string | null = null;
     if (autoMission.status !== "pending") {
       if (!n) {
@@ -2106,7 +2106,7 @@ export default function DocumentPage() {
 
             <div className="rounded-lg bg-brand-bg/70 border border-brand-border p-3 mt-2 text-[11px] text-brand-slate leading-relaxed space-y-1">
               <div><b>Bloqueo:</b> el documento queda cerrado para edición mientras trabaja.</div>
-              <div><b>Cola:</b> corre en el servidor — podés navegar o cerrar la pestaña sin perder nada.</div>
+              <div><b>En segundo plano:</b> corre en el servidor — podés navegar o cerrar la pestaña sin perder nada.</div>
               <div><b>Resultado:</b> una versión nueva revisable (el historial compara los cambios) y una notificación al terminar, con la duración total.</div>
             </div>
 
@@ -2116,7 +2116,7 @@ export default function DocumentPage() {
                 onClick={launchAuto}
                 disabled={autoBrief.trim().length < 20 || autoLaunching}
               >
-                {autoLaunching ? "Encolando…" : "Lanzar investigación automática"}
+                {autoLaunching ? "Iniciando…" : "Lanzar investigación automática"}
               </button>
               <button className="btn-secondary" onClick={() => setAutoDialog(false)}>
                 Cancelar
