@@ -182,9 +182,14 @@ async def list_messages(
             pass
     result = await db.execute(query.order_by(ChatMessage.created_at.desc()).limit(limit))
     messages = list(reversed(result.scalars().all()))
+    # Foto de perfil de cada remitente
+    photos = {
+        uid: url for uid, url in await db.execute(select(User.id, User.photo_url)) if url
+    }
     return [
         {
             "id": m.id, "user_id": m.user_id, "user_name": m.user_name,
+            "user_photo_url": photos.get(m.user_id),
             "content": m.content, "mentions": m.mentions, "created_at": m.created_at,
         }
         for m in messages
@@ -248,6 +253,7 @@ async def send_message(
     await db.refresh(message)
     return {
         "id": message.id, "user_id": message.user_id, "user_name": message.user_name,
+        "user_photo_url": access.user.photo_url,
         "content": message.content, "mentions": message.mentions,
         "created_at": message.created_at,
     }

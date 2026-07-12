@@ -208,6 +208,22 @@ h3,
   from { width: 0; }
 }
 
+/* Mensajes del chat: entrada con rebote sutil (estilo iMessage) */
+@keyframes vexMsgIn {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.msg-in {
+  animation: vexMsgIn 0.24s cubic-bezier(0.34, 1.4, 0.64, 1);
+  transform-origin: bottom;
+}
+
 @keyframes vc-fade {
   from { opacity: 0; }
   to { opacity: 1; }

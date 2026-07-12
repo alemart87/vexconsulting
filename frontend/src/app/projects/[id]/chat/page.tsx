@@ -16,10 +16,16 @@ interface Msg {
   id: string;
   user_id: string;
   user_name: string;
+  user_photo_url?: string | null;
   content: string;
   mentions?: { users?: { id: string; name: string }[]; notes?: { id: string; title: string }[] };
   created_at: string;
 }
+
+const EMOJI_ONLY = /^[\p{Extended_Pictographic}‍️\s]{1,8}$/u;
+
+const minutesBetween = (a?: string, b?: string) =>
+  a && b ? Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 60000 : Infinity;
 interface Mentionable {
   users: { id: string; name: string }[];
   notes: { id: string; title: string; status: string }[];
@@ -293,47 +299,113 @@ export default function ChatPage() {
         </div>
 
         <div ref={msgScrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((m) => (
-            <div key={m.id} className={m.user_id === me?.id ? "flex justify-end" : "flex"}>
-              <div
-                className={`max-w-[78%] rounded-lg px-3.5 py-2 ${
-                  m.user_id === me?.id ? "bg-brand-primary text-white" : "bg-brand-bg"
-                }`}
-              >
-                <div
-                  className={`text-[10px] font-semibold mb-0.5 ${
-                    m.user_id === me?.id ? "text-white/75" : "text-brand-slate"
-                  }`}
-                >
-                  {m.user_name} ·{" "}
-                  {new Date(m.created_at).toLocaleTimeString("es-PY", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </div>
-                <div className="text-sm whitespace-pre-wrap break-words">
-                  {m.user_id === me?.id ? m.content : renderContent(m.content)}
-                </div>
-                {m.mentions?.notes && m.mentions.notes.length > 0 && (
-                  <div className="flex gap-1 flex-wrap mt-1.5">
-                    {m.mentions.notes.map((n) => (
-                      <Link
-                        key={n.id}
-                        href={`/projects/${params.id}/notes`}
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                          m.user_id === me?.id
-                            ? "bg-white/20 text-white"
-                            : "bg-brand-cyan/10 text-brand-cyan"
-                        }`}
-                      >
-                        📝 {n.title}
-                      </Link>
-                    ))}
+          {messages.map((m, i) => {
+            const mine = m.user_id === me?.id;
+            const prev = messages[i - 1];
+            const next = messages[i + 1];
+            // Agrupación estilo iMessage: mismo remitente dentro de 5 minutos
+            const firstOfGroup =
+              !prev || prev.user_id !== m.user_id || minutesBetween(prev.created_at, m.created_at) > 5;
+            const lastOfGroup =
+              !next || next.user_id !== m.user_id || minutesBetween(m.created_at, next.created_at) > 5;
+            const showTimeDivider = !prev || minutesBetween(prev.created_at, m.created_at) > 30;
+            const emojiOnly = EMOJI_ONLY.test(m.content.trim());
+
+            return (
+              <div key={m.id}>
+                {showTimeDivider && (
+                  <div className="text-center text-[10px] text-brand-mist font-semibold py-1.5">
+                    {new Date(m.created_at).toLocaleDateString("es-PY", {
+                      day: "numeric", month: "short",
+                    })}{" "}
+                    {new Date(m.created_at).toLocaleTimeString("es-PY", {
+                      hour: "2-digit", minute: "2-digit",
+                    })}
                   </div>
                 )}
+                <div
+                  className={`flex items-end gap-2 msg-in ${mine ? "justify-end" : ""} ${
+                    firstOfGroup ? "mt-2" : "mt-0.5"
+                  }`}
+                >
+                  {/* Avatar del remitente (solo ajenos, en el último del grupo) */}
+                  {!mine && (
+                    <div className="w-7 shrink-0">
+                      {lastOfGroup &&
+                        (m.user_photo_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={m.user_photo_url}
+                            alt={m.user_name}
+                            title={m.user_name}
+                            className="h-7 w-7 rounded-full object-cover border border-brand-border"
+                          />
+                        ) : (
+                          <div
+                            title={m.user_name}
+                            className="h-7 w-7 rounded-full bg-brand-purple text-white flex items-center justify-center font-bold text-[11px]"
+                          >
+                            {(m.user_name || "?").slice(0, 1).toUpperCase()}
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                  <div className={`max-w-[75%] ${mine ? "items-end" : ""}`}>
+                    {!mine && firstOfGroup && (
+                      <div className="text-[10px] font-semibold text-brand-slate mb-0.5 ml-1">
+                        {m.user_name}
+                      </div>
+                    )}
+                    {emojiOnly ? (
+                      <div className={`text-4xl leading-tight ${mine ? "text-right" : ""}`}>
+                        {m.content.trim()}
+                      </div>
+                    ) : (
+                      <div
+                        className={`px-3.5 py-2 text-sm whitespace-pre-wrap break-words shadow-soft ${
+                          mine
+                            ? `bg-gradient-to-b from-brand-primary to-brand-primary-dark text-white rounded-2xl ${
+                                lastOfGroup ? "rounded-br-[5px]" : ""
+                              }`
+                            : `bg-white border border-brand-border text-brand-ink rounded-2xl ${
+                                lastOfGroup ? "rounded-bl-[5px]" : ""
+                              }`
+                        }`}
+                      >
+                        {mine ? m.content : renderContent(m.content)}
+                        {m.mentions?.notes && m.mentions.notes.length > 0 && (
+                          <div className="flex gap-1 flex-wrap mt-1.5">
+                            {m.mentions.notes.map((n) => (
+                              <Link
+                                key={n.id}
+                                href={`/projects/${params.id}/notes`}
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                                  mine ? "bg-white/20 text-white" : "bg-brand-cyan/10 text-brand-cyan"
+                                }`}
+                              >
+                                📝 {n.title}
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {lastOfGroup && (
+                      <div
+                        className={`text-[9px] text-brand-mist mt-0.5 ${
+                          mine ? "text-right mr-1" : "ml-1"
+                        }`}
+                      >
+                        {new Date(m.created_at).toLocaleTimeString("es-PY", {
+                          hour: "2-digit", minute: "2-digit",
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {messages.length === 0 && (
             <p className="text-center text-sm text-brand-slate pt-16">
               Sin mensajes todavía. Empezá la conversación del equipo.
