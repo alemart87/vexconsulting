@@ -434,6 +434,43 @@ async def send_message(
     })
 
 
+async def _log_direct_cost(
+    db: AsyncSession, *, project_id: str, user_id: str, agent_type: str,
+    conv_title: str, content: str, usage, model: str,
+) -> None:
+    """Registra el costo de llamadas directas (sin agente) en un hilo técnico
+    por proyecto: así TODO gasto de IA fluye al tablero de Costos IA."""
+    from ...services.agent.pricing import compute_cost_usd
+
+    if not usage:
+        return
+    inp = int(getattr(usage, "prompt_tokens", 0) or 0)
+    out = int(getattr(usage, "completion_tokens", 0) or 0)
+    cached = int(getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0)
+    cost = compute_cost_usd(inp, out, cached)
+
+    conv = (await db.execute(
+        select(Conversation).where(
+            Conversation.project_id == project_id,
+            Conversation.agent_type == agent_type,
+        ).order_by(Conversation.created_at).limit(1)
+    )).scalar_one_or_none()
+    if not conv:
+        conv = Conversation(
+            user_id=user_id, project_id=project_id,
+            agent_type=agent_type, title=conv_title,
+        )
+        db.add(conv)
+        await db.flush()
+    db.add(Message(
+        conversation_id=conv.id, role="assistant", content=content[:300],
+        tool_calls={"cost_openai": cost, "model": model, "direct": True},
+        input_tokens=inp, cached_tokens=cached, output_tokens=out,
+        total_tokens=inp + out, cost_usd=cost,
+    ))
+    await db.commit()
+
+
 @router.post("/projects/{project_id}/agent/suggest")
 async def suggest_text(
     project_id: str,
@@ -487,6 +524,15 @@ async def suggest_text(
         ],
     )
     suggestion = (resp.choices[0].message.content or "").strip()
+    try:
+        await _log_direct_cost(
+            db, project_id=project_id, user_id=access.user.id,
+            agent_type="redaccion", conv_title="Ayuda de redacción (editor)",
+            content=f"[Ayuda de redacción] {instruction[:120]}",
+            usage=getattr(resp, "usage", None), model=settings.agent_model,
+        )
+    except Exception:  # pragma: no cover — el registro nunca rompe la sugerencia
+        logger.warning("No se pudo registrar el costo de la sugerencia")
     return {"suggestion": suggestion}
 
 

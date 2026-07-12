@@ -210,4 +210,25 @@ async def generate_tasks(
         tareas = data.get("tareas", [])
     except Exception:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "La IA no devolvió un cronograma válido")
+
+    # Costo registrado para Costos IA (bloque de auditoría)
+    try:
+        from ...services.agent.pricing import compute_cost_usd
+        from ...services.audit_service import log_action
+
+        usage = getattr(resp, "usage", None)
+        cached = int(getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0)
+        cost = compute_cost_usd(
+            int(getattr(usage, "prompt_tokens", 0) or 0),
+            int(getattr(usage, "completion_tokens", 0) or 0),
+            cached,
+        )
+        await log_action(
+            db, user_id=access.user.id, user_email=access.user.email,
+            user_role=access.user.role, action="gantt.generate",
+            project_id=project_id, entity_type="gantt", entity_id=project_id,
+            detail={"tareas": len(tareas), "cost_usd": round(cost, 4)},
+        )
+    except Exception:
+        pass
     return {"draft": tareas}

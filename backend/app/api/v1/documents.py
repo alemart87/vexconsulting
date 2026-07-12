@@ -237,25 +237,38 @@ async def integrate_content(
         force=True,
     )
 
-    # Trazabilidad + Costos IA: el paso queda en el hilo del investigador
-    conversation_id = payload.get("conversation_id")
-    if conversation_id:
-        from ...models.conversation import Conversation, Message
+    # Trazabilidad + Costos IA: el paso queda SIEMPRE en un hilo del
+    # investigador (si no vino uno válido, se usa/crea el del proyecto)
+    from ...models.conversation import Conversation, Message
 
-        conv = await db.get(Conversation, conversation_id)
-        if conv and conv.project_id == project_id:
-            db.add(Message(
-                conversation_id=conversation_id, role="assistant",
-                content=f"[Integración en el documento] {resumen or ''} · secciones: "
-                        f"{', '.join(secciones) or '—'} · versión {version.version_number}",
-                tool_calls={"status": "done", "engine": "vex", "integracion": True,
-                            "cost_openai": cost, "model": breakdown.get("model")},
-                input_tokens=breakdown.get("input_tokens", 0),
-                cached_tokens=breakdown.get("cached_tokens", 0),
-                output_tokens=breakdown.get("output_tokens", 0),
-                total_tokens=breakdown.get("input_tokens", 0) + breakdown.get("output_tokens", 0),
-                cost_usd=cost,
-            ))
+    conversation_id = payload.get("conversation_id")
+    conv = await db.get(Conversation, conversation_id) if conversation_id else None
+    if not conv or conv.project_id != project_id:
+        conv = (await db.execute(
+            select(Conversation).where(
+                Conversation.project_id == project_id,
+                Conversation.agent_type == "investigacion",
+            ).order_by(Conversation.updated_at.desc()).limit(1)
+        )).scalar_one_or_none()
+    if not conv:
+        conv = Conversation(
+            user_id=access.user.id, project_id=project_id,
+            agent_type="investigacion", title="Integraciones en el documento",
+        )
+        db.add(conv)
+        await db.flush()
+    db.add(Message(
+        conversation_id=conv.id, role="assistant",
+        content=f"[Integración en el documento] {resumen or ''} · secciones: "
+                f"{', '.join(secciones) or '—'} · versión {version.version_number}",
+        tool_calls={"status": "done", "engine": "vex", "integracion": True,
+                    "cost_openai": cost, "model": breakdown.get("model")},
+        input_tokens=breakdown.get("input_tokens", 0),
+        cached_tokens=breakdown.get("cached_tokens", 0),
+        output_tokens=breakdown.get("output_tokens", 0),
+        total_tokens=breakdown.get("input_tokens", 0) + breakdown.get("output_tokens", 0),
+        cost_usd=cost,
+    ))
 
     await log_action(
         db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,

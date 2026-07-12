@@ -128,8 +128,8 @@ def _doc_outline(md: str) -> str:
     return "\n".join(heads[:40])
 
 
-async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> list[dict]:
-    """El planificador convierte el brief en 2-6 tareas de investigación."""
+async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> tuple[list[dict], float]:
+    """El planificador convierte el brief en 2-6 tareas. Devuelve (tareas, costo)."""
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -164,6 +164,13 @@ async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> list[dict]:
     tareas = [t for t in data.get("tareas", []) if t.get("consulta")][:MAX_TASKS]
     if not tareas:
         raise ValueError("El planificador no propuso tareas")
+    usage = getattr(resp, "usage", None)
+    cached = int(getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0)
+    plan_cost = compute_cost_usd(
+        int(getattr(usage, "prompt_tokens", 0) or 0),
+        int(getattr(usage, "completion_tokens", 0) or 0),
+        cached,
+    )
     return [
         {
             "titulo": str(t.get("titulo") or f"Tarea {i + 1}")[:120],
@@ -172,7 +179,7 @@ async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> list[dict]:
             "status": "pending",
         }
         for i, t in enumerate(tareas)
-    ]
+    ], plan_cost
 
 
 def _insert_into_md(doc_md: str, seccion: str, titulo: str, body: str) -> str:
@@ -328,12 +335,19 @@ async def _process(mission_id: str) -> None:
 
     renewer = asyncio.create_task(_renew_lock_loop(project_id, mission_id))
     try:
-        # 1) PLAN
-        steps = await _plan_tasks(brief, project_name, doc_md)
+        # 1) PLAN (su costo también queda registrado para Costos IA)
+        steps, plan_cost = await _plan_tasks(brief, project_name, doc_md)
         await _set_steps(mission_id, steps, 0)
+        await _log_step_messages(
+            conversation_id,
+            "[Plan] Convertir el pedido en tareas de investigación.",
+            "[Plan] " + " · ".join(s["titulo"] for s in steps),
+            [], plan_cost,
+            {"openai": plan_cost, "perplexity": 0.0, "model": settings.agent_model},
+        )
 
         # 2) INVESTIGAR cada tarea (secuencial: es una cola, no una estampida)
-        total_cost = 0.0
+        total_cost = plan_cost
         total_citas = 0
         results: list[dict] = []
         for i, step in enumerate(steps):

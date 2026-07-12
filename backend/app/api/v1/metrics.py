@@ -150,7 +150,8 @@ async def project_metrics(
 
 _USO_LABELS = {
     "investigacion": "Investigador",
-    "acompanante": "Asistente de redacción",
+    "acompanante": "Chat del agente",
+    "redaccion": "Ayuda de redacción (editor)",
     "evaluador": "Evaluador",
     "visualizador": "Asistente del visualizador",
 }
@@ -257,11 +258,31 @@ async def ai_costs(
         by_use["Edición final APA"]["usd"] += final_edit_usd
         by_provider["openai"] += final_edit_usd
 
+    # --- Gantt generado con IA (auditoría) ---
+    gantt_usd = 0.0
+    gantt_count = 0
+    gantt_rows = await db.execute(
+        select(AuditLog.detail)
+        .where(AuditLog.action == "gantt.generate", AuditLog.created_at >= since)
+        .limit(500)
+    )
+    for (detail,) in gantt_rows:
+        d = detail if isinstance(detail, dict) else {}
+        if d.get("cost_usd"):
+            gantt_usd += float(d["cost_usd"])
+            gantt_count += 1
+    if gantt_usd:
+        by_use.setdefault("Gantt con IA", {"usd": 0.0, "consultas": 0})
+        by_use["Gantt con IA"]["usd"] += gantt_usd
+        by_use["Gantt con IA"]["consultas"] += gantt_count
+        by_provider["openai"] += gantt_usd
+
     # --- KnowHub (audio, mapas mentales, briefings, FAQ) ---
     from ...models.knowhub import KnowHubItem
 
     kh_labels = {"audio": "KnowHub · audio", "mindmap": "KnowHub · mapa mental",
-                 "briefing": "KnowHub · briefing", "faq": "KnowHub · FAQ"}
+                 "briefing": "KnowHub · briefing", "faq": "KnowHub · FAQ",
+                 "slides": "KnowHub · presentación"}
     kh_total = 0.0
     kh_rows = await db.execute(
         select(
@@ -297,7 +318,7 @@ async def ai_costs(
         by_use.setdefault("Indexación de fuentes (embeddings)", {"usd": 0.0, "consultas": 0})
         by_use["Indexación de fuentes (embeddings)"]["usd"] += emb
 
-    total = messages_total + eval_usd + final_edit_usd + emb + kh_total
+    total = messages_total + eval_usd + final_edit_usd + gantt_usd + emb + kh_total
     r6 = lambda x: round(float(x), 4)  # noqa: E731
     return {
         "days": days,
