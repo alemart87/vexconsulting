@@ -13,7 +13,7 @@ services:
     healthCheckPath: /health
     disk:
       name: vexdata
-      mountPath: /var/data
+      mountPath: /persistent
       sizeGB: 10
     envVars:
       - key: ENV
@@ -33,11 +33,13 @@ services:
       - key: PERPLEXITY_API_KEY
         sync: false
       - key: AGENT_MODEL
-        value: gpt-5.4
+        value: gpt-5.6-terra
       - key: UPLOAD_DIR
-        value: /var/data/uploads
+        value: /persistent/uploads
       - key: EXPORT_DIR
-        value: /var/data/exports
+        value: /persistent/exports
+      - key: CORS_ORIGINS
+        sync: false
       - key: BACKEND_URL
         value: http://127.0.0.1:8000
       - key: JWT_ACCESS_EXPIRE_MINUTES
