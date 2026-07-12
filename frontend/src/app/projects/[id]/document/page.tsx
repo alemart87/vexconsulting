@@ -331,7 +331,10 @@ export default function DocumentPage() {
     let pct = 2;
     let stage = "Arrancando";
     let detail = "El motor de investigación está tomando la misión (una por vez).";
+    // warn = alarma real (el motor perdió el pulso: requiere acción).
+    // info = aviso tranquilo (todo sano, solo está tomando su tiempo).
     let warn: string | null = null;
+    let info: string | null = null;
     if (autoMission.status !== "pending") {
       if (!n) {
         // La barra «respira» durante la planificación (4 → 9 %)
@@ -341,10 +344,9 @@ export default function DocumentPage() {
           autoMission.stage_note ||
           "El planificador está convirtiendo el pedido en tareas de investigación concretas.";
         if (elapsedS0 > 200) {
-          warn =
-            "La planificación está tardando más de lo normal (suele ser una demora " +
-            "transitoria de OpenAI). Tiene un tope de 3 minutos: si no responde se " +
-            "cancela sola y podés relanzarla — o cancelala ahora.";
+          info =
+            "La planificación está tomando un poco más de lo habitual. Tranquilo: " +
+            "tiene un tope de 3 minutos y, si no responde, se recupera sola.";
         }
       } else {
         const done = steps.filter((s) => s.status === "done").length;
@@ -364,9 +366,10 @@ export default function DocumentPage() {
             : "Preparando la siguiente tarea…";
         }
         if (elapsedS0 > 18 * 60) {
-          warn =
-            "Está tardando más de lo esperado. Hay un tope de 30 minutos: si no " +
-            "termina se corta solo y el documento queda liberado — o cancelá ahora.";
+          info =
+            "Investigación profunda en curso: las tareas están procesando muchas " +
+            "fuentes y eso lleva su tiempo. Todo está sano — podés seguir con otra " +
+            "cosa, al terminar llega la notificación.";
         }
       }
     }
@@ -380,8 +383,8 @@ export default function DocumentPage() {
       autoMission.status !== "pending" && hbAgeS != null && hbAgeS > 90;
     if (hbStale) {
       warn =
-        "El motor de investigación no da señales de vida. El sistema lo corta y " +
-        "libera el documento solo en ~1 minuto — o tocá «Forzar corte» ahora.";
+        "El motor perdió el pulso investigativo. El sistema lo corta y libera el " +
+        "documento solo en ~1 minuto — o tocá «Forzar corte» ahora.";
     }
     if (autoMission.status === "cancelling") {
       stage = "Cancelando";
@@ -403,7 +406,7 @@ export default function DocumentPage() {
       const k = n || 3;
       eta = `~${Math.ceil(k * 1.5 + 1)}–${Math.ceil(k * 2.5 + 2)} min estimados`;
     }
-    return { pct, stage, detail, elapsed, eta, warn, hbStale, hbAgeS };
+    return { pct, stage, detail, elapsed, eta, warn, info, hbStale, hbAgeS };
   })();
 
   const agoLabel = (iso: string) => {
@@ -1115,7 +1118,7 @@ export default function DocumentPage() {
                           : "bg-red-500"
                     }`}
                   />
-                  latido hace {autoView.hbAgeS} s
+                  pulso investigativo hace {autoView.hbAgeS} s
                 </span>
               )}
               {autoView.elapsed} transcurridos · {autoView.eta}
@@ -1125,6 +1128,12 @@ export default function DocumentPage() {
           {autoView.warn && (
             <div className="mt-2 rounded-md bg-amber-500/15 border border-amber-400/30 px-3 py-2 text-xs text-amber-200">
               {autoView.warn}
+            </div>
+          )}
+          {/* Aviso tranquilo: todo sano, solo tarda — sin colores de alarma */}
+          {!autoView.warn && autoView.info && (
+            <div className="mt-2 rounded-md bg-white/5 border border-white/10 px-3 py-2 text-xs text-white/65">
+              {autoView.info}
             </div>
           )}
 
