@@ -201,6 +201,7 @@ export default function AppShell({
             <span data-tour="nav-metodo">
               <NavLink href="/metodo" label="Método y fuentes" />
             </span>
+            <NavLink href="/uso" label="Uso colaborativo" />
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isLider && (
               <span data-tour="nav-costos">
@@ -269,6 +270,7 @@ export default function AppShell({
             </div>
             <NavLink href="/dashboard" label="Proyectos" />
             <NavLink href="/metodo" label="Método y fuentes" />
+            <NavLink href="/uso" label="Uso colaborativo" />
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isLider && <NavLink href="/admin/costos" label="Costos IA" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
