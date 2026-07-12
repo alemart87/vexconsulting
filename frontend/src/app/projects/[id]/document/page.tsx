@@ -320,14 +320,27 @@ export default function DocumentPage() {
     if (!autoMission || !autoActive) return null;
     const steps = autoMission.steps || [];
     const n = steps.length;
+    const startedIso0 = autoMission.started_at || autoMission.created_at;
+    const elapsedS0 = Math.max(
+      0,
+      Math.floor((Date.now() - parseApiDate(startedIso0).getTime()) / 1000)
+    );
     let pct = 2;
     let stage = "En cola";
     let detail = "Esperando el turno del motor de investigación (una misión por vez).";
+    let warn: string | null = null;
     if (autoMission.status !== "pending") {
       if (!n) {
-        pct = 6;
+        // La barra «respira» durante la planificación (4 → 9 %)
+        pct = Math.min(9, 4 + Math.floor(elapsedS0 / 30));
         stage = "Etapa 1 de 3 · Planificación";
         detail = "El planificador está convirtiendo el pedido en tareas de investigación concretas.";
+        if (elapsedS0 > 200) {
+          warn =
+            "La planificación está tardando más de lo normal (suele ser una demora " +
+            "transitoria de OpenAI). Tiene un tope de 3 minutos: si no responde se " +
+            "cancela sola y podés relanzarla — o cancelala ahora.";
+        }
       } else {
         const done = steps.filter((s) => s.status === "done").length;
         const running = steps.find((s) => s.status === "running");
@@ -343,17 +356,25 @@ export default function DocumentPage() {
             ? `«${running.titulo}»${running.seccion ? ` → sección «${running.seccion}»` : ""}`
             : "Preparando la siguiente tarea…";
         }
+        if (elapsedS0 > 18 * 60) {
+          warn =
+            "Está tardando más de lo esperado. Hay un tope de 30 minutos: si no " +
+            "termina se corta solo y el documento queda liberado — o cancelá ahora.";
+        }
       }
     }
     if (autoMission.status === "cancelling") {
       stage = "Cancelando";
-      detail = "Cortando entre tareas — el documento no queda a medias.";
+      detail = "Cortando la misión — el documento queda liberado en segundos, sin cambios a medias.";
+      warn = null;
     }
     const startedIso = autoMission.started_at || autoMission.created_at;
     const elapsedS = Math.max(0, Math.floor((Date.now() - parseApiDate(startedIso).getTime()) / 1000));
     const elapsed = `${Math.floor(elapsedS / 60)}:${String(elapsedS % 60).padStart(2, "0")}`;
     let eta: string;
-    if (pct >= 12 && elapsedS > 20) {
+    if (warn) {
+      eta = "demorado";
+    } else if (pct >= 12 && elapsedS > 20) {
       const remaining = Math.max(0, Math.round(elapsedS / (pct / 100)) - elapsedS);
       eta = remaining > 90
         ? `~${Math.ceil(remaining / 60)} min restantes`
@@ -362,7 +383,7 @@ export default function DocumentPage() {
       const k = n || 3;
       eta = `~${Math.ceil(k * 1.5 + 1)}–${Math.ceil(k * 2.5 + 2)} min estimados`;
     }
-    return { pct, stage, detail, elapsed, eta };
+    return { pct, stage, detail, elapsed, eta, warn };
   })();
 
   const fmtDuration = (seg?: number) => {
@@ -1029,19 +1050,19 @@ export default function DocumentPage() {
                 {autoView.pct}%
               </span>
               <button
-                className="text-xs px-2.5 py-1 rounded-md border border-white/25 text-white/80 hover:bg-white/10"
+                className="text-xs px-2.5 py-1 rounded-md border border-white/25 text-white/80 hover:bg-white/10 disabled:opacity-60"
                 onClick={cancelAuto}
                 disabled={autoMission.status === "cancelling"}
               >
-                Cancelar
+                {autoMission.status === "cancelling" ? "Cancelando…" : "Cancelar"}
               </button>
             </div>
           </div>
 
-          {/* Barra de progreso */}
+          {/* Barra de progreso (rayas en movimiento: siempre se ve vivo) */}
           <div className="mt-2 h-1.5 rounded-full bg-white/15 overflow-hidden">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-cyan to-emerald-400 transition-all duration-700"
+              className="gantt-fill h-full rounded-full bg-brand-cyan transition-all duration-700"
               style={{ width: `${autoView.pct}%` }}
             />
           </div>
@@ -1056,6 +1077,12 @@ export default function DocumentPage() {
               {autoView.elapsed} transcurridos · {autoView.eta}
             </span>
           </div>
+
+          {autoView.warn && (
+            <div className="mt-2 rounded-md bg-amber-500/15 border border-amber-400/30 px-3 py-2 text-xs text-amber-200">
+              {autoView.warn}
+            </div>
+          )}
 
           {autoMission.steps.length > 0 && (
             <div className="mt-2 pt-2 border-t border-white/10 grid gap-1 sm:grid-cols-2">

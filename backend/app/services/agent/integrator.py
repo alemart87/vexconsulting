@@ -162,7 +162,7 @@ async def plan_integration(
 
     from .pricing import compute_cost_usd
 
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180, max_retries=1)
     user_msg = (
         f"DOCUMENTO MAESTRO ACTUAL:\n{doc_md[:MAX_DOC_CHARS]}\n\n"
         + (f"PEDIDO ORIGINAL DEL CONSULTOR: {hint}\n\n" if hint else "")

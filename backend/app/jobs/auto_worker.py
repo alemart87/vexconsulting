@@ -32,6 +32,9 @@ logger = logging.getLogger("vexconsulting")
 _signal = asyncio.Event()
 
 MISSION_TIMEOUT = 30 * 60  # tope duro: nada queda «corriendo» para siempre
+PLAN_TIMEOUT = 180         # la planificación es UNA llamada corta: 3 min máximo
+TASK_TIMEOUT = 10 * 60     # tope por investigación individual
+INTEGRATE_TIMEOUT = 300    # tope de la integración (con fallback determinista)
 MAX_TASKS = 6
 
 
@@ -132,7 +135,9 @@ async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> tuple[list[
     """El planificador convierte el brief en 2-6 tareas. Devuelve (tareas, costo)."""
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    # Timeout explícito: el default de la librería (600 s × reintentos) dejaba
+    # misiones colgadas media hora en «Planificación» ante fallas de red.
+    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=90, max_retries=1)
     resp = await client.chat.completions.create(
         model=settings.agent_model,
         response_format={"type": "json_object"},
@@ -336,7 +341,15 @@ async def _process(mission_id: str) -> None:
     renewer = asyncio.create_task(_renew_lock_loop(project_id, mission_id))
     try:
         # 1) PLAN (su costo también queda registrado para Costos IA)
-        steps, plan_cost = await _plan_tasks(brief, project_name, doc_md)
+        try:
+            steps, plan_cost = await asyncio.wait_for(
+                _plan_tasks(brief, project_name, doc_md), timeout=PLAN_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            raise ValueError(
+                "La planificación no respondió en 3 minutos (demora transitoria "
+                "de OpenAI o de red). Relanzá la investigación."
+            )
         await _set_steps(mission_id, steps, 0)
         await _log_step_messages(
             conversation_id,
@@ -365,11 +378,20 @@ async def _process(mission_id: str) -> None:
                 "Entregá SOLO el texto final listo para el documento (markdown, con "
                 "las citas de tus fuentes). Sin preámbulos ni preguntas."
             )
-            answer, citations, cost, breakdown = await run_researcher(
-                project_name=project_name, project_id=project_id,
-                user_id=requested_by, user_name=requested_by_name,
-                prompt=prompt,
-            )
+            try:
+                answer, citations, cost, breakdown = await asyncio.wait_for(
+                    run_researcher(
+                        project_name=project_name, project_id=project_id,
+                        user_id=requested_by, user_name=requested_by_name,
+                        prompt=prompt,
+                    ),
+                    timeout=TASK_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                raise ValueError(
+                    f"La tarea «{step['titulo']}» superó los 10 minutos y se "
+                    "canceló. Acotá el pedido y reintentá."
+                )
             if not (answer or "").strip():
                 raise ValueError(f"La tarea «{step['titulo']}» no devolvió contenido")
             total_cost += cost
@@ -399,8 +421,9 @@ async def _process(mission_id: str) -> None:
                 f"## {r['titulo']}\n(Sección sugerida: {r['seccion'] or 'a criterio'})\n\n{r['answer']}"
                 for r in results
             )
-            ops, integration_summary, int_cost, int_breakdown = await plan_integration(
-                current_md, combined, hint=brief
+            ops, integration_summary, int_cost, int_breakdown = await asyncio.wait_for(
+                plan_integration(current_md, combined, hint=brief),
+                timeout=INTEGRATE_TIMEOUT,
             )
             new_md, _secs = apply_ops(current_md, ops)
             total_cost += int_cost
@@ -453,16 +476,44 @@ async def _process(mission_id: str) -> None:
         renewer.cancel()
 
 
+async def _abort(proc: asyncio.Task) -> None:
+    proc.cancel()
+    try:
+        await proc
+    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+        pass
+
+
+async def _watch_mission(mission_id: str) -> None:
+    """Corre la misión con un vigilante en paralelo: el botón Cancelar corta
+    AL INSTANTE (aunque el worker esté dentro de una llamada a OpenAI, que era
+    donde antes quedaba sordo), y el tope de 30 minutos también se aplica acá."""
+    proc = asyncio.create_task(_process(mission_id))
+    started = asyncio.get_running_loop().time()
+    while True:
+        done, _ = await asyncio.wait({proc}, timeout=5)
+        if done:
+            if not proc.cancelled() and proc.exception():
+                logger.error("Error en misión %s", mission_id, exc_info=proc.exception())
+            return
+        if await _check_cancelled(mission_id):
+            await _abort(proc)
+            await _finish(mission_id, status="cancelled")
+            return
+        if asyncio.get_running_loop().time() - started > MISSION_TIMEOUT:
+            await _abort(proc)
+            await _finish(mission_id, status="failed",
+                          error="Superó los 30 minutos y se canceló. Acotá el pedido y reintentá.")
+            return
+
+
 async def auto_worker() -> None:
     logger.info("auto_worker iniciado")
     while True:
         mission_id = await _claim_next()
         if mission_id:
             try:
-                await asyncio.wait_for(_process(mission_id), timeout=MISSION_TIMEOUT)
-            except asyncio.TimeoutError:
-                await _finish(mission_id, status="failed",
-                              error="Superó los 30 minutos y se canceló. Acotá el pedido y reintentá.")
+                await _watch_mission(mission_id)
             except Exception:
                 logger.exception("Error en misión %s", mission_id)
             continue

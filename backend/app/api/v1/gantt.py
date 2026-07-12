@@ -184,7 +184,7 @@ async def generate_tasks(
 
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=120, max_retries=1)
     context = (
         f"Documento (primeros 6000 chars):\n{(doc.content_md if doc else '')[:6000]}\n\n"
         f"Notas: {[f'{n.kind}: {n.title} [{n.status}]' for n in notes]}\n"

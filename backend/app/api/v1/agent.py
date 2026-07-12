@@ -499,7 +499,7 @@ async def suggest_text(
     except Exception:
         pass
 
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=90, max_retries=1)
     instruction = payload.instruction or (
         "Continuá el texto de forma natural, en el mismo registro, con 1 a 3 "
         "oraciones sobrias de informe de investigación. Si el texto termina a "
