@@ -7,20 +7,37 @@ import AppShell from "@/components/AppShell";
 import { ProjectContext, ProjectInfo } from "@/components/ProjectContext";
 import { apiFetch } from "@/lib/api";
 
-const TABS = [
-  { href: "", label: "Resumen" },
-  { href: "/document", label: "Documento" },
-  { href: "/preview", label: "Vista previa" },
-  { href: "/sources", label: "Fuentes" },
-  { href: "/notes", label: "Notas" },
-  { href: "/knowhub", label: "KnowHub" },
-  { href: "/chat", label: "Chat equipo" },
-  { href: "/gantt", label: "Gantt" },
-  { href: "/agent", label: "Agente IA" },
-  { href: "/evaluations", label: "Evaluación" },
-  { href: "/metrics", label: "Métricas" },
-  { href: "/members", label: "Equipo" },
-  { href: "/audit", label: "Auditoría" },
+// El navbar se organiza en zonas con lógica de flujo de trabajo:
+// producir el informe → colaborar alrededor de él → controlar calidad y equipo.
+const GROUPS = [
+  {
+    label: "Trabajo",
+    tabs: [
+      { href: "", label: "Resumen" },
+      { href: "/document", label: "Documento" },
+      { href: "/preview", label: "Vista previa" },
+      { href: "/sources", label: "Fuentes" },
+      { href: "/notes", label: "Notas" },
+      { href: "/gantt", label: "Gantt" },
+    ],
+  },
+  {
+    label: "Colaboración",
+    tabs: [
+      { href: "/chat", label: "Chat equipo" },
+      { href: "/agent", label: "Agente IA" },
+      { href: "/knowhub", label: "KnowHub" },
+    ],
+  },
+  {
+    label: "Control",
+    tabs: [
+      { href: "/evaluations", label: "Evaluación" },
+      { href: "/metrics", label: "Métricas" },
+      { href: "/members", label: "Equipo" },
+      { href: "/audit", label: "Auditoría" },
+    ],
+  },
 ];
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
@@ -40,9 +57,11 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
 
   const base = `/projects/${params.id}`;
   const isAdmin = project?.my_permission === "admin";
-  const visibleTabs = TABS.filter(
-    (t) => isAdmin || !["/audit", "/metrics"].includes(t.href)
-  );
+  const visibleGroups = GROUPS.map((g) => ({
+    ...g,
+    tabs: g.tabs.filter((t) => isAdmin || !["/audit", "/metrics"].includes(t.href)),
+  })).filter((g) => g.tabs.length > 0);
+  const visibleTabs = visibleGroups.flatMap((g) => g.tabs);
   const isActive = (href: string) =>
     href === "" ? pathname === base : pathname?.startsWith(`${base}${href}`);
   const currentTab = visibleTabs.find((t) => isActive(t.href)) ?? visibleTabs[0];
@@ -88,14 +107,18 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                   style={{ colorScheme: "light" }}
                   className="w-full appearance-none rounded-lg bg-white text-brand-ink font-semibold text-sm border-l-4 border-l-brand-primary border border-brand-border shadow-soft pl-4 pr-10 py-3 focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 >
-                  {visibleTabs.map((t) => (
-                    <option
-                      key={t.href}
-                      value={t.href}
-                      style={{ background: "#fff", color: "#0F1116" }}
-                    >
-                      {t.label}
-                    </option>
+                  {visibleGroups.map((g) => (
+                    <optgroup key={g.label} label={`Zona de ${g.label.toLowerCase()}`}>
+                      {g.tabs.map((t) => (
+                        <option
+                          key={t.href}
+                          value={t.href}
+                          style={{ background: "#fff", color: "#0F1116" }}
+                        >
+                          {t.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-brand-primary text-xs">
@@ -105,20 +128,34 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             </div>
 
             {/* Desktop: barra de pills (identidad Voicenter) */}
-            <nav className="hidden md:flex rounded-xl glass-ink px-2 py-1.5 gap-1 overflow-x-auto scrollbar-thin">
-              {visibleTabs.map((t) => (
-                <Link
-                  key={t.href}
-                  href={`${base}${t.href}`}
-                  data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider2 transition-colors ${
-                    isActive(t.href)
-                      ? "pill-liquid text-white"
-                      : "text-white/70 hover:text-white hover:bg-white/10"
+            <nav className="hidden md:flex rounded-xl glass-ink px-2 py-1 overflow-x-auto scrollbar-thin items-stretch">
+              {visibleGroups.map((g, gi) => (
+                <div
+                  key={g.label}
+                  className={`flex flex-col justify-center px-1.5 ${
+                    gi > 0 ? "border-l border-white/10 ml-1.5" : ""
                   }`}
                 >
-                  {t.label}
-                </Link>
+                  <span className="px-2 pt-0.5 text-[8px] font-bold uppercase tracking-[0.22em] text-white/35 leading-none select-none">
+                    {g.label}
+                  </span>
+                  <div className="flex gap-1 pt-0.5 pb-0.5">
+                    {g.tabs.map((t) => (
+                      <Link
+                        key={t.href}
+                        href={`${base}${t.href}`}
+                        data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
+                        className={`whitespace-nowrap px-3 py-1 rounded-md text-xs font-semibold uppercase tracking-wider2 transition-colors ${
+                          isActive(t.href)
+                            ? "pill-liquid text-white"
+                            : "text-white/70 hover:text-white hover:bg-white/10"
+                        }`}
+                      >
+                        {t.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
               ))}
             </nav>
           </div>
