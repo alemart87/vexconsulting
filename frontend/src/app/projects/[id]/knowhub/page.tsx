@@ -38,6 +38,8 @@ function useMarkmap(md: string | null | undefined, interactive: boolean) {
   useEffect(() => {
     if (!md) return;
     let destroyed = false;
+    const timers: number[] = [];
+    let ro: ResizeObserver | null = null;
     (async () => {
       const [{ Transformer }, { Markmap }] = await Promise.all([
         import("markmap-lib"),
@@ -70,14 +72,34 @@ function useMarkmap(md: string | null | undefined, interactive: boolean) {
         },
         root
       );
-      // El contenedor toma tamaño después del layout: re-encuadrar asentado
-      const refit = () => mmRef.current?.fit();
-      setTimeout(refit, 150);
-      setTimeout(refit, 500);
-      setTimeout(refit, 950);
-      const ro = new ResizeObserver(refit);
+      // El contenedor toma tamaño después del layout: re-encuadrar asentado.
+      // GUARD isConnected: si el fit corre con el SVG ya desmontado (modal
+      // cerrado, navegación), d3-zoom no puede resolver el ancho relativo y
+      // revienta con NotSupportedError — tumbando toda la página en dev.
+      const refit = () => {
+        try {
+          const mm = mmRef.current;
+          if (destroyed || !svgRef.current?.isConnected || !mm) return;
+          // Si la medición inicial corrió con el layout todavía sin tamaño,
+          // state.rect queda en 0 y los nodos se apilan: re-medir primero.
+          const rect = mm.state?.rect;
+          if (!rect || rect.x2 - rect.x1 < 1) mm.renderData?.();
+          mm.fit();
+        } catch {
+          /* SVG en transición de desmontaje: ignorar */
+        }
+      };
+      // Estabilización determinista: fit repetido durante los primeros 2 s
+      // (el timing de montaje varía con StrictMode/carga) y luego se apaga.
+      let ticks = 0;
+      const interval = window.setInterval(() => {
+        ticks += 1;
+        refit();
+        if (ticks >= 10 || destroyed) window.clearInterval(interval);
+      }, 200);
+      timers.push(interval as unknown as number);
+      ro = new ResizeObserver(refit);
       if (svgRef.current.parentElement) ro.observe(svgRef.current.parentElement);
-      (mmRef.current as any).__ro = ro;
 
       // UX: clic en el TEXTO del nodo también expande/colapsa (los círculos
       // solos son un blanco demasiado chico).
@@ -89,7 +111,7 @@ function useMarkmap(md: string | null | undefined, interactive: boolean) {
           const data = g?.__data__?.data ?? g?.__data__;
           if (!data?.children?.length) return;
           try {
-            mmRef.current?.toggleNode?.(data);
+            if (svgRef.current?.isConnected) mmRef.current?.toggleNode?.(data);
           } catch {
             /* sin hijos: ignorar */
           }
@@ -98,8 +120,16 @@ function useMarkmap(md: string | null | undefined, interactive: boolean) {
     })();
     return () => {
       destroyed = true;
-      (mmRef.current as any)?.__ro?.disconnect?.();
-      mmRef.current?.destroy?.();
+      timers.forEach((t) => {
+        clearTimeout(t);
+        clearInterval(t);
+      });
+      ro?.disconnect();
+      try {
+        mmRef.current?.destroy?.();
+      } catch {
+        /* ya desmontado */
+      }
       mmRef.current = null;
     };
   }, [md, interactive]);
