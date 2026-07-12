@@ -29,11 +29,37 @@ const BRAND_PALETTE = ["#E6332A", "#00B2BF", "#662483", "#F39200", "#2A9D5C", "#
 
 /* ================= Render markmap (compartido) ================= */
 
-function useMarkmap(md: string | null | undefined, interactive: boolean) {
+function useMarkmap(
+  md: string | null | undefined,
+  interactive: boolean,
+  onNodeClick?: (node: any) => void
+) {
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<any>(null);
   const mdRef = useRef(md);
   mdRef.current = md;
+  const onNodeClickRef = useRef(onNodeClick);
+  onNodeClickRef.current = onNodeClick;
+
+  /** Estabiliza medición y encuadre (rect en 0 → renderData → fit). */
+  const stabilize = (rounds = 10) => {
+    let ticks = 0;
+    const interval = window.setInterval(() => {
+      ticks += 1;
+      try {
+        const mm = mmRef.current;
+        if (mm && svgRef.current?.isConnected) {
+          const rect = mm.state?.rect;
+          if (!rect || rect.x2 - rect.x1 < 1) mm.renderData?.();
+          mm.fit();
+        }
+      } catch {
+        /* desmontando: ignorar */
+      }
+      if (ticks >= rounds) window.clearInterval(interval);
+    }, 200);
+    return interval;
+  };
 
   useEffect(() => {
     if (!md) return;
@@ -72,49 +98,30 @@ function useMarkmap(md: string | null | undefined, interactive: boolean) {
         },
         root
       );
-      // El contenedor toma tamaño después del layout: re-encuadrar asentado.
-      // GUARD isConnected: si el fit corre con el SVG ya desmontado (modal
-      // cerrado, navegación), d3-zoom no puede resolver el ancho relativo y
-      // revienta con NotSupportedError — tumbando toda la página en dev.
-      const refit = () => {
+      // Estabilización de montaje: medición y encuadre pueden correr antes
+      // de que el layout tenga tamaño (rect en 0 → nodos apilados) y los
+      // fit() sobre un SVG desmontado revientan d3-zoom — stabilize() cubre
+      // ambos con guards.
+      timers.push(stabilize(10));
+      ro = new ResizeObserver(() => {
         try {
-          const mm = mmRef.current;
-          if (destroyed || !svgRef.current?.isConnected || !mm) return;
-          // Si la medición inicial corrió con el layout todavía sin tamaño,
-          // state.rect queda en 0 y los nodos se apilan: re-medir primero.
-          const rect = mm.state?.rect;
-          if (!rect || rect.x2 - rect.x1 < 1) mm.renderData?.();
-          mm.fit();
+          if (svgRef.current?.isConnected) mmRef.current?.fit();
         } catch {
-          /* SVG en transición de desmontaje: ignorar */
+          /* desmontando */
         }
-      };
-      // Estabilización determinista: fit repetido durante los primeros 2 s
-      // (el timing de montaje varía con StrictMode/carga) y luego se apaga.
-      let ticks = 0;
-      const interval = window.setInterval(() => {
-        ticks += 1;
-        refit();
-        if (ticks >= 10 || destroyed) window.clearInterval(interval);
-      }, 200);
-      timers.push(interval as unknown as number);
-      ro = new ResizeObserver(refit);
+      });
       if (svgRef.current.parentElement) ro.observe(svgRef.current.parentElement);
 
-      // UX: clic en el TEXTO del nodo también expande/colapsa (los círculos
-      // solos son un blanco demasiado chico).
+      // UX: clic en el TEXTO del nodo abre su panel de detalle; el CÍRCULO
+      // expande/colapsa (comportamiento nativo de markmap).
       if (interactive) {
         svgRef.current.addEventListener("click", (e) => {
           const target = e.target as Element;
-          if (target.tagName === "circle") return; // ya lo maneja markmap
+          if (target.tagName === "circle") return; // toggle nativo
           const g = target.closest("g.markmap-node") as any;
           const data = g?.__data__?.data ?? g?.__data__;
-          if (!data?.children?.length) return;
-          try {
-            if (svgRef.current?.isConnected) mmRef.current?.toggleNode?.(data);
-          } catch {
-            /* sin hijos: ignorar */
-          }
+          if (!data) return;
+          onNodeClickRef.current?.(data);
         });
       }
     })();
@@ -134,19 +141,68 @@ function useMarkmap(md: string | null | undefined, interactive: boolean) {
     };
   }, [md, interactive]);
 
-  return { svgRef, mmRef };
+  /** Profundidad visible: re-transforma y setData con initialExpandLevel;
+   *  la estabilización re-mide (renderData) y encuadra. */
+  const applyLevel = async (level: number) => {
+    const mm = mmRef.current;
+    if (!mm || !mdRef.current) return;
+    try {
+      const { Transformer } = await import("markmap-lib");
+      const { root } = new Transformer().transform(mdRef.current);
+      await mm.setData(root, { initialExpandLevel: level });
+    } catch {
+      return;
+    }
+    stabilize(8);
+  };
+
+  return { svgRef, mmRef, applyLevel };
+}
+
+/** Ancestros de un nodo (por state.path) para el breadcrumb del detalle. */
+function findAncestors(root: any, target: any): any[] {
+  const path: any[] = [];
+  const walk = (node: any, trail: any[]): boolean => {
+    const here = [...trail, node];
+    if (node === target || (node.state?.id && node.state.id === target.state?.id)) {
+      path.push(...here);
+      return true;
+    }
+    return (node.children || []).some((c: any) => walk(c, here));
+  };
+  walk(root, []);
+  return path;
+}
+
+function nodeText(node: any): string {
+  const div = document.createElement("div");
+  div.innerHTML = String(node?.content ?? "");
+  return div.textContent || "";
 }
 
 /* ================= Mapa mental: pantalla completa ================= */
 
 function MindmapViewer({ md, title, onClose }: { md: string; title: string; onClose: () => void }) {
-  const { svgRef, mmRef } = useMarkmap(md, true);
+  const [detail, setDetail] = useState<{ node: any; trail: any[]; color: string } | null>(null);
+  const [activeLevel, setActiveLevel] = useState(-1);
+  const { svgRef, mmRef, applyLevel } = useMarkmap(md, true, (node) => {
+    const root = mmRef.current?.state?.data;
+    const trail = root ? findAncestors(root, node) : [node];
+    const branchId = trail[1]?.state?.path?.split(".")[1] ?? trail[1]?.state?.id ?? 0;
+    const color = BRAND_PALETTE[(parseInt(String(branchId), 10) || 0) % BRAND_PALETTE.length];
+    setDetail({ node, trail, color });
+  });
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (detail) setDetail(null);
+        else onClose();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, detail]);
 
   const downloadSvg = () => {
     if (!svgRef.current) return;
@@ -178,6 +234,31 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
           <span className="font-display uppercase text-brand-ink truncate">{title}</span>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          {/* Profundidad visible del mapa */}
+          <div className="flex rounded-md border border-brand-border overflow-hidden">
+            {[
+              { v: 2, label: "Ramas" },
+              { v: 3, label: "Detalle" },
+              { v: -1, label: "Todo" },
+            ].map(({ v, label }) => (
+              <button
+                key={v}
+                className={`px-3 h-9 text-xs font-semibold transition-colors ${
+                  activeLevel === v
+                    ? "bg-brand-purple text-white"
+                    : "bg-white text-brand-graphite hover:bg-brand-bg"
+                }`}
+                title={v === -1 ? "Expandir todo el mapa" : "Limitar la profundidad visible"}
+                onClick={() => {
+                  setActiveLevel(v);
+                  applyLevel(v);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="w-px h-6 bg-brand-border mx-0.5" />
           <Tool label="－" title="Alejar" onClick={() => mmRef.current?.rescale(0.75)} />
           <Tool label="＋" title="Acercar" onClick={() => mmRef.current?.rescale(1.3)} />
           <Tool label="⤢ Ajustar" title="Ajustar el mapa a la pantalla" onClick={() => mmRef.current?.fit()} />
@@ -190,12 +271,103 @@ function MindmapViewer({ md, title, onClose }: { md: string; title: string; onCl
           </button>
         </div>
       </div>
-      <div className="flex-1 min-h-0 markmap-host">
+      <div className="flex-1 min-h-0 markmap-host relative overflow-hidden">
         <svg ref={svgRef} className="w-full h-full" />
+
+        {/* Panel de detalle del tema (slide-over) */}
+        <div
+          className={`absolute top-0 right-0 h-full w-[400px] max-w-[92vw] bg-white shadow-elevated border-l border-brand-border flex flex-col transition-transform duration-300 ease-out ${
+            detail ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          {detail && (
+            <>
+              <div
+                className="px-5 py-4 text-white shrink-0"
+                style={{ background: detail.color }}
+              >
+                {/* Ruta de la rama */}
+                <div className="text-[10px] uppercase tracking-wider2 text-white/75 leading-relaxed">
+                  {detail.trail
+                    .slice(0, -1)
+                    .map((n) => nodeText(n))
+                    .join("  ›  ") || "Tema central"}
+                </div>
+                <div className="font-display text-xl uppercase leading-tight mt-1">
+                  {nodeText(detail.node)}
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5">
+                {detail.node.children?.length ? (
+                  <>
+                    <div className="label mb-3">
+                      Contenido de esta rama ({detail.node.children.length})
+                    </div>
+                    <ul className="space-y-2.5">
+                      {detail.node.children.map((child: any, i: number) => (
+                        <li key={i} className="animate-fade" style={{ animationDelay: `${i * 40}ms` }}>
+                          <div className="flex items-start gap-2.5">
+                            <span
+                              className="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0"
+                              style={{ background: detail.color }}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-brand-ink leading-snug">
+                                {nodeText(child)}
+                              </div>
+                              {child.children?.length > 0 && (
+                                <ul className="mt-1.5 space-y-1 border-l-2 pl-3" style={{ borderColor: `${detail.color}44` }}>
+                                  {child.children.map((gc: any, j: number) => (
+                                    <li key={j} className="text-[13px] text-brand-graphite leading-snug">
+                                      {nodeText(gc)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="text-sm text-brand-slate leading-relaxed">
+                    Este es un dato puntual del mapa — no tiene sub-puntos. El contexto
+                    completo está en su rama:{" "}
+                    <b className="text-brand-ink">{nodeText(detail.trail[1] ?? detail.node)}</b>.
+                  </p>
+                )}
+              </div>
+              <div className="p-4 border-t border-brand-border flex gap-2 shrink-0">
+                {detail.node.children?.length > 0 && (
+                  <button
+                    className="btn-secondary !py-1.5 text-xs flex-1"
+                    onClick={() => {
+                      try {
+                        mmRef.current?.toggleNode?.(detail.node);
+                      } catch {
+                        /* sin efecto */
+                      }
+                    }}
+                  >
+                    ⊕ Expandir/colapsar en el mapa
+                  </button>
+                )}
+                <button
+                  className="btn-ghost !py-1.5 text-xs flex-1"
+                  onClick={() => setDetail(null)}
+                >
+                  ✕ Cerrar detalle
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
       <div className="px-4 py-2 text-[11px] text-brand-slate border-t border-brand-border shrink-0 bg-brand-bg-soft">
-        💡 Clic en el <b>texto</b> de un nodo (o en su círculo) para expandir/colapsar esa
-        rama · rueda para zoom · arrastrá para moverte · «Ajustar» recompone la vista
+        💡 Clic en el <b>texto</b> de un tema para ver su detalle · clic en el{" "}
+        <b>círculo</b> para expandir/colapsar la rama · «Ramas / Detalle / Todo» controla
+        la profundidad · rueda para zoom · arrastrá para moverte · «Ajustar» recompone
       </div>
     </div>
   );
