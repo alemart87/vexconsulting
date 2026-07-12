@@ -56,6 +56,7 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("conversations", "role_slug", "VARCHAR(50)"),
     ("auto_missions", "stage_note", "TEXT"),
     ("auto_missions", "heartbeat_at", "TIMESTAMPTZ"),
+    ("auto_missions", "events", "JSON"),
 ]
 
 # Sentencias idempotentes que corren en cada arranque (solo Postgres).
