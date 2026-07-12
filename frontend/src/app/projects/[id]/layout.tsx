@@ -49,6 +49,8 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   const router = useRouter();
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [error, setError] = useState("");
+  // Proyectos que se vincularon a ESTE (ej.: materiales de un plan de curso)
+  const [linkedChildren, setLinkedChildren] = useState<{ id: string; name: string }[]>([]);
 
   const reload = () => {
     apiFetch<ProjectInfo>(`/api/v1/projects/${params.id}`)
@@ -57,6 +59,18 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   };
 
   useEffect(reload, [params.id]);
+
+  useEffect(() => {
+    apiFetch<any[]>("/api/v1/projects")
+      .then((list) =>
+        setLinkedChildren(
+          list
+            .filter((p) => p.related_project_id === params.id)
+            .map((p) => ({ id: p.id, name: p.name }))
+        )
+      )
+      .catch(() => {});
+  }, [params.id]);
 
   const base = `/projects/${params.id}`;
   const isAdmin = project?.my_permission === "admin";
@@ -91,6 +105,25 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                 {project?.my_permission && (
                   <span className="badge-cyan">permiso: {project.my_permission}</span>
                 )}
+                {project?.related_project_id && (
+                  <Link
+                    href={`/projects/${project.related_project_id}`}
+                    className="badge bg-brand-purple/10 text-brand-purple hover:bg-brand-purple hover:text-white transition-colors"
+                    title="Plan vinculado a este material (cargado como fuente)"
+                  >
+                    🔗 plan: {project.related_project_name ?? "proyecto vinculado"}
+                  </Link>
+                )}
+                {linkedChildren.map((c) => (
+                  <Link
+                    key={c.id}
+                    href={`/projects/${c.id}`}
+                    className="badge bg-brand-cyan/10 text-brand-cyan hover:bg-brand-cyan hover:text-white transition-colors"
+                    title="Material del curso creado a partir de este plan"
+                  >
+                    📚 material: {c.name}
+                  </Link>
+                ))}
               </div>
             </div>
           </div>

@@ -236,6 +236,73 @@ _CAPACITACION_MD = """# {name}
 Listar bibliografía, normativas y materiales de terceros utilizados, con enlace verificable.
 """
 
+_CAPACITACION_CONTENIDO_MD = """# {name}
+
+**Estado**: borrador · **Tipo**: material del curso · **Plan vinculado**: *(se carga como fuente de este proyecto)*
+
+> **Cómo trabajar este documento**: el plan de la capacitación está cargado en
+> **Fuentes** de este proyecto. Pedile al investigador (Diseñador instruccional)
+> que redacte cada módulo **citando el plan**: «Redactá el contenido del Módulo 1
+> según la malla curricular del plan vinculado». Duplicá el bloque de módulo
+> tantas veces como módulos tenga la malla.
+
+## Ficha del material
+
+- **Curso**: *(nombre del curso, del plan vinculado)*
+- **Versión del material**: 0.1 · **Última revisión pedagógica**: *(fecha)*
+- **Instructores que lo usarán**: *(nombres)*
+
+---
+
+## Módulo 1 — *(nombre del módulo, según la malla del plan)*
+
+### Objetivos del módulo
+
+*(Copiar de la malla: qué será capaz de hacer el participante al terminar este módulo.)*
+
+### Contenido desarrollado
+
+*(El contenido completo que se enseña: conceptos, ejemplos de la operación,
+capturas de sistemas, casos reales anonimizados. Escribir para el participante.)*
+
+### Actividad práctica
+
+- **Consigna**: *(qué hace el participante, individual o en grupo)*
+- **Materiales**: *(guion de role-play, dataset de práctica, accesos)*
+- **Tiempo**: *(minutos)* · **Cierre**: *(qué se pone en común y cómo se corrige)*
+
+### Guion del instructor
+
+| Momento | Duración | Qué hace el instructor | Qué hacen los participantes |
+| --- | --- | --- | --- |
+| Apertura | | *(gancho, conexión con el puesto)* | |
+| Desarrollo | | | |
+| Práctica | | | |
+| Cierre | | *(síntesis, puente al módulo siguiente)* | |
+
+### Evaluación del módulo
+
+*(Preguntas del quiz con sus respuestas correctas marcadas, o rúbrica de la
+observación en práctica. Alineadas a los objetivos del módulo.)*
+
+### Material del participante
+
+*(Resumen de una página que se lleva el participante: ideas clave, pasos del
+procedimiento, errores frecuentes.)*
+
+---
+
+## Anexos
+
+- **Glosario**: términos del curso con definición breve.
+- **Banco de preguntas**: preguntas adicionales para re-evaluaciones.
+- **Plantillas de role-play**: guiones completos con variantes.
+
+## Referencias
+
+Bibliografía y materiales de terceros usados en el contenido, con enlace verificable.
+"""
+
 _BLANK_MD = """# {name}
 
 *(Documento maestro del proyecto.)*
@@ -310,6 +377,25 @@ _TEMPLATES: dict[str, dict] = {
             ("Preparar pre-test y post-test alineados a los objetivos", "tarea"),
             ("Confirmar cobertura de las posiciones durante el dictado", "tarea"),
             ("Definir el indicador operativo que medirá la transferencia (Kirkpatrick N3)", "tarea"),
+        ],
+    },
+    "capacitacion_contenido": {
+        "label": "Material del curso (contenido)",
+        "agent_role": "disenador_instruccional",
+        "content": _CAPACITACION_CONTENIDO_MD,
+        "gantt": [
+            ("Redacción del contenido — Módulo 1", "fuentes", 0, 5),
+            ("Redacción del contenido — Módulos siguientes", "fuentes", 5, 10),
+            ("Guiones del instructor y actividades prácticas", "evidencia", 10, 7),
+            ("Quices, rúbricas y material del participante", "evidencia", 15, 5),
+            ("Revisión pedagógica contra el plan", "sintesis", 20, 4),
+            ("Prueba con un instructor y ajustes", "evaluacion", 24, 4),
+            ("Versión final del material", "evaluacion", 28, 2),
+        ],
+        "notes": [
+            ("Confirmar cantidad y nombres de módulos según la malla del plan", "tarea"),
+            ("Recolectar casos reales de la operación para los ejemplos", "tarea"),
+            ("Verificar que cada quiz evalúa el objetivo de su módulo", "tarea"),
         ],
     },
     "blank": {

@@ -8,6 +8,9 @@ export interface ProjectInfo {
   status: string;
   my_permission?: string;
   agent_role_slug?: string;
+  template_slug?: string | null;
+  related_project_id?: string | null;
+  related_project_name?: string | null;
   published_version_id?: string | null;
   owner_name?: string;
 }

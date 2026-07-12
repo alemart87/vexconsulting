@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
@@ -74,11 +74,19 @@ const CATEGORIES: Category[] = [
     templates: [
       {
         slug: "capacitacion_curso",
-        label: "Curso / Capacitación",
-        desc: "Ciclo formativo completo: necesidad del negocio, objetivos de aprendizaje medibles, malla curricular por módulos, materiales, evaluación con certificación y medición de impacto (Kirkpatrick).",
+        label: "Plan de capacitación",
+        desc: "El diseño del curso: necesidad del negocio, objetivos de aprendizaje medibles, malla curricular por módulos, evaluación con certificación y medición de impacto (Kirkpatrick).",
         includes: ["Documento estructurado", "Gantt · 8 tareas", "Notas semilla · 5"],
         agent: "Diseñador instruccional",
         placeholder: "Ej.: Onboarding de agentes — campaña cobranzas",
+      },
+      {
+        slug: "capacitacion_contenido",
+        label: "Material del curso (contenido)",
+        desc: "El curso en sí, módulo por módulo: contenido desarrollado, actividades prácticas, guion del instructor, quices con respuestas y material del participante. Se vincula a su plan, que entra como fuente para que el agente redacte citándolo.",
+        includes: ["Documento por módulos", "Gantt · 7 tareas", "Vínculo al plan"],
+        agent: "Diseñador instruccional",
+        placeholder: "Ej.: Material — Onboarding de agentes cobranzas",
       },
     ],
   },
@@ -112,11 +120,29 @@ export default function NewProjectPage() {
   const [template, setTemplate] = useState("metodo_cientifico_bpo");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Vínculo con el plan (para "Material del curso"): el documento del plan
+  // se carga como fuente del proyecto nuevo.
+  const [plans, setPlans] = useState<{ id: string; name: string }[]>([]);
+  const [relatedId, setRelatedId] = useState("");
 
   const selected = useMemo(
     () => ALL_TEMPLATES.find((t) => t.slug === template) ?? ALL_TEMPLATES[0],
     [template]
   );
+  const needsLink = selected.slug === "capacitacion_contenido";
+
+  useEffect(() => {
+    if (!needsLink || plans.length) return;
+    apiFetch<any[]>("/api/v1/projects")
+      .then((list) =>
+        setPlans(
+          list
+            .filter((p) => p.template_slug === "capacitacion_curso")
+            .map((p) => ({ id: p.id, name: p.name }))
+        )
+      )
+      .catch(() => {});
+  }, [needsLink, plans.length]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,7 +151,12 @@ export default function NewProjectPage() {
     try {
       const project = await apiFetch<any>("/api/v1/projects", {
         method: "POST",
-        body: JSON.stringify({ name, description, template_slug: template }),
+        body: JSON.stringify({
+          name,
+          description,
+          template_slug: template,
+          related_project_id: needsLink && relatedId ? relatedId : undefined,
+        }),
       });
       router.push(`/projects/${project.id}`);
     } catch (err: any) {
@@ -246,10 +277,42 @@ export default function NewProjectPage() {
                   placeholder={
                     selected.slug === "capacitacion_curso"
                       ? "Necesidad del negocio, público objetivo y resultado esperado…"
-                      : "Objetivo y alcance de la investigación…"
+                      : selected.slug === "capacitacion_contenido"
+                        ? "Qué módulos cubre este material y para qué edición del curso…"
+                        : "Objetivo y alcance de la investigación…"
                   }
                 />
               </div>
+              {needsLink && (
+                <div className="rounded-lg border border-brand-cyan/40 bg-brand-cyan/5 p-3 animate-fade">
+                  <label className="label !text-brand-cyan">
+                    🔗 Vincular con el plan de capacitación
+                  </label>
+                  <select
+                    className="input"
+                    value={relatedId}
+                    onChange={(e) => setRelatedId(e.target.value)}
+                  >
+                    <option value="">— Sin vincular (podés hacerlo después subiendo el plan como fuente) —</option>
+                    {plans.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-brand-slate mt-1.5 leading-relaxed">
+                    El documento del plan se carga automáticamente como <b>fuente</b> de
+                    este proyecto: el Diseñador instruccional redacta cada módulo citando
+                    la malla curricular y los objetivos aprobados.
+                  </p>
+                  {plans.length === 0 && (
+                    <p className="text-[11px] text-brand-orange mt-1">
+                      No hay planes de capacitación todavía — creá primero un «Plan de
+                      capacitación».
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -276,7 +339,11 @@ export default function NewProjectPage() {
                 </>
               ) : null}
               , con {selected.includes.join(", ").toLowerCase()} y el agente{" "}
-              {selected.agent}.
+              {selected.agent}
+              {needsLink && relatedId
+                ? ` — vinculado al plan «${plans.find((p) => p.id === relatedId)?.name ?? ""}» (entra como fuente)`
+                : ""}
+              .
             </div>
             <div className="flex gap-2 shrink-0">
               <button type="submit" className="btn-primary" disabled={loading || !name.trim()}>

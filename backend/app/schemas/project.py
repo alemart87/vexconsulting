@@ -16,6 +16,9 @@ class ProjectCreate(BaseModel):
     template_slug: Optional[str] = "blank"
     # None → la plantilla sugiere el rol (capacitación → diseñador instruccional)
     agent_role_slug: Optional[str] = None
+    # Proyecto vinculado (ej.: material del curso → su plan de capacitación).
+    # El documento del vinculado se carga como fuente del proyecto nuevo.
+    related_project_id: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -34,6 +37,8 @@ class ProjectOut(BaseModel):
     agent_role_slug: str
     owner_id: str
     owner_name: Optional[str] = None
+    related_project_id: Optional[str] = None
+    related_project_name: Optional[str] = None
     published_version_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: datetime

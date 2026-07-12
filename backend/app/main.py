@@ -34,6 +34,7 @@ VECTOR_AVAILABLE = False
 REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("projects", "agent_instructions_override", "TEXT"),
     ("projects", "owner_name", "VARCHAR(255)"),
+    ("projects", "related_project_id", "VARCHAR(36)"),
     ("documents", "lock_user_name", "VARCHAR(255)"),
     ("documents", "final_edit_status", "VARCHAR(20)"),
     ("documents", "final_edit_detail", "JSON"),

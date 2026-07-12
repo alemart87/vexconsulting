@@ -28,6 +28,8 @@ class Project(Base):
     agent_instructions_override: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_id: Mapped[str] = mapped_column(String(36), index=True)
     owner_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Vínculo entre proyectos (ej.: material del curso → plan de capacitación)
+    related_project_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     published_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_by: Mapped[str | None] = mapped_column(String(36), nullable=True)

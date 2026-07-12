@@ -33,6 +33,9 @@ async def _project_out(
 ) -> ProjectOut:
     out = ProjectOut.model_validate(project)
     out.my_permission = permission
+    if project.related_project_id:
+        related = await db.get(Project, project.related_project_id)
+        out.related_project_name = related.name if related else None
     count = await db.execute(
         select(func.count(ProjectMember.id)).where(ProjectMember.project_id == project.id)
     )
@@ -81,6 +84,12 @@ async def create_project(
     actor: CurrentUser = Depends(require_lider),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectOut:
+    related: Project | None = None
+    if payload.related_project_id:
+        related = await db.get(Project, payload.related_project_id)
+        if not related:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "El proyecto vinculado no existe")
+
     project = Project(
         name=payload.name.strip(),
         description=payload.description,
@@ -92,6 +101,7 @@ async def create_project(
         or "consultor_bpo",
         owner_id=actor.id,
         owner_name=actor.full_name,
+        related_project_id=related.id if related else None,
     )
     db.add(project)
     await db.flush()
@@ -110,7 +120,65 @@ async def create_project(
     )
     await db.refresh(project)
     await template_service.seed_project_extras(db, project, actor)
+    if related:
+        # El documento del proyecto vinculado (ej.: el plan del curso) entra
+        # como FUENTE del nuevo proyecto: el agente redacta citándolo.
+        try:
+            await _seed_related_source(db, project, related, actor)
+        except Exception:  # pragma: no cover — el vínculo nunca frena la creación
+            import logging
+
+            logging.getLogger("vexconsulting").exception(
+                "No se pudo sembrar el documento vinculado como fuente"
+            )
     return await _project_out(db, project, "admin")
+
+
+async def _seed_related_source(
+    db: AsyncSession, project: Project, related: Project, actor
+) -> None:
+    """Carga el documento maestro del proyecto vinculado como fuente lista
+    para el RAG del proyecto nuevo (mismo pipeline que una subida manual)."""
+    import hashlib
+    import uuid as uuid_mod
+
+    from ...core.config import settings
+    from ...jobs.source_worker import signal_source_queue
+    from ...models.source import Source
+
+    doc = (
+        await db.execute(select(Document).where(Document.project_id == related.id))
+    ).scalar_one_or_none()
+    content = (doc.content_md or "").strip() if doc else ""
+    if not content:
+        return
+
+    data = content.encode("utf-8")
+    source_id = str(uuid_mod.uuid4())
+    folder = settings.upload_path / project.id / "sources" / source_id
+    folder.mkdir(parents=True, exist_ok=True)
+    safe_name = f"plan-vinculado-{related.name[:60]}.md".replace("/", "_").replace("\\", "_")
+    target = folder / safe_name
+    target.write_bytes(data)
+
+    db.add(
+        Source(
+            id=source_id,
+            project_id=project.id,
+            kind="file",
+            title=f"Plan vinculado — {related.name}"[:500],
+            original_filename=safe_name,
+            mime_type="text/markdown",
+            sha256=hashlib.sha256(data).hexdigest(),
+            stored_path=str(target),
+            size_bytes=len(data),
+            status="pending",
+            uploaded_by=actor.id,
+            uploaded_by_name=actor.full_name,
+        )
+    )
+    await db.commit()
+    signal_source_queue()
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
