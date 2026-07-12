@@ -31,5 +31,13 @@ async def start_workers() -> list[asyncio.Task]:
     except ImportError:
         pass
 
+    try:
+        from .auto_worker import auto_worker, recover_stale_auto
+
+        await recover_stale_auto()
+        tasks.append(asyncio.create_task(auto_worker(), name="auto_worker"))
+    except ImportError:
+        pass
+
     logger.info("%d workers de fondo iniciados", len(tasks))
     return tasks

@@ -227,6 +227,107 @@ export default function DocumentPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode]);
 
+  // ---- ⚡ Modo automático: cola de fondo en el servidor (polls cortos,
+  // sin conexiones largas — el trabajo sobrevive a navegación y deploys) ----
+  interface AutoStep {
+    titulo: string;
+    seccion: string;
+    status: string;
+    citas?: number;
+    palabras?: number;
+  }
+  interface AutoMission {
+    id: string;
+    status: string;
+    brief: string;
+    steps: AutoStep[];
+    current_step: number;
+    result?: {
+      version_number?: number;
+      tareas?: number;
+      palabras_agregadas?: number;
+      citas?: number;
+    } | null;
+    last_error?: string | null;
+    requested_by_name?: string | null;
+    created_at: string;
+    started_at?: string | null;
+  }
+  const AUTO_ACTIVE = ["pending", "running", "cancelling"];
+  const [autoMission, setAutoMission] = useState<AutoMission | null>(null);
+  const [autoDialog, setAutoDialog] = useState(false);
+  const [autoBrief, setAutoBrief] = useState("");
+  const [autoLaunching, setAutoLaunching] = useState(false);
+  const [autoDone, setAutoDone] = useState<AutoMission | null>(null); // banner de cierre
+  const autoActiveRef = useRef(false);
+
+  const autoActive = !!autoMission && AUTO_ACTIVE.includes(autoMission.status);
+
+  const loadAuto = useCallback(async () => {
+    try {
+      const list = await apiFetch<AutoMission[]>(
+        `/api/v1/projects/${params.id}/agent/auto`
+      );
+      const latest = list[0] ?? null;
+      const isActive = !!latest && AUTO_ACTIVE.includes(latest.status);
+      // Transición corriendo → terminó: recargar documento y mostrar cierre
+      if (autoActiveRef.current && latest && !isActive) {
+        setAutoDone(latest);
+        try {
+          const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
+          setDoc(d);
+          if (latest.status === "done") setEditorKey((k) => k + 1);
+        } catch {}
+      }
+      autoActiveRef.current = isActive;
+      setAutoMission(latest);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id]);
+
+  useEffect(() => {
+    loadAuto();
+  }, [loadAuto]);
+
+  useEffect(() => {
+    if (!autoActive) return;
+    const interval = setInterval(loadAuto, 5000);
+    return () => clearInterval(interval);
+  }, [autoActive, loadAuto]);
+
+  const launchAuto = async () => {
+    const brief = autoBrief.trim();
+    if (brief.length < 20 || autoLaunching) return;
+    setAutoLaunching(true);
+    try {
+      await apiFetch(`/api/v1/projects/${params.id}/agent/auto`, {
+        method: "POST",
+        body: JSON.stringify({ brief }),
+      });
+      setAutoDialog(false);
+      setAutoBrief("");
+      setAutoDone(null);
+      await loadAuto();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setAutoLaunching(false);
+    }
+  };
+
+  const cancelAuto = async () => {
+    if (!autoMission) return;
+    try {
+      await apiFetch(
+        `/api/v1/projects/${params.id}/agent/auto/${autoMission.id}/cancel`,
+        { method: "POST" }
+      );
+      loadAuto();
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   // ---- Edición final APA (job de fondo previo a publicar) ----
   const [editorKey, setEditorKey] = useState(0); // remonta el editor al cargar la edición
   const [finalDismissed, setFinalDismissed] = useState(false);
@@ -412,7 +513,8 @@ export default function DocumentPage() {
     doc.lock_user_id !== user?.id &&
     !!doc.lock_expires_at &&
     new Date(doc.lock_expires_at) > new Date();
-  const editable = canWrite && !lockedByOther;
+  // Mientras el modo automático trabaja, NADIE escribe (el agente tiene el lock)
+  const editable = canWrite && !lockedByOther && !autoActive;
 
   useEffect(() => {
     apiFetch<Doc>(`/api/v1/projects/${params.id}/document`).then(setDoc);
@@ -633,9 +735,105 @@ export default function DocumentPage() {
 
   return (
     <div className="space-y-3">
-      {lockedByOther && (
+      {lockedByOther && !autoActive && (
         <div className="rounded-md bg-brand-orange/10 border border-brand-orange/40 px-4 py-2.5 text-sm text-brand-graphite animate-fade">
           ✏️ <b>{doc.lock_user_name}</b> está editando el documento. Se abrió en modo lectura.
+        </div>
+      )}
+
+      {/* ⚡ Modo automático en curso: cola + progreso, el documento queda bloqueado */}
+      {autoActive && autoMission && (
+        <div className="rounded-md bg-brand-ink text-white px-4 py-3 text-sm animate-fade">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="h-4 w-4 shrink-0 rounded-full border-2 border-brand-cyan border-t-transparent animate-spin" />
+              <b className="shrink-0">
+                ⚡{" "}
+                {autoMission.status === "pending"
+                  ? "Investigación automática en cola"
+                  : autoMission.status === "cancelling"
+                    ? "Cancelando…"
+                    : "Investigación automática en curso"}
+              </b>
+              <span className="text-white/60 text-xs truncate">
+                «{autoMission.brief.slice(0, 90)}»
+              </span>
+            </div>
+            <button
+              className="text-xs px-2.5 py-1 rounded-md border border-white/25 text-white/80 hover:bg-white/10 shrink-0"
+              onClick={cancelAuto}
+              disabled={autoMission.status === "cancelling"}
+            >
+              Cancelar
+            </button>
+          </div>
+          <div className="text-[11px] text-white/60 mt-1.5">
+            El documento queda <b>bloqueado</b> hasta que termine. Podés navegar a
+            cualquier parte — el trabajo corre en el servidor y te llega una 🔔 al final.
+          </div>
+          {autoMission.steps.length > 0 && (
+            <div className="mt-2 grid gap-1 sm:grid-cols-2">
+              {autoMission.steps.map((s, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-[11px] min-w-0">
+                  {s.status === "done" ? (
+                    <span className="text-emerald-400 shrink-0">✓</span>
+                  ) : s.status === "running" ? (
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-brand-cyan border-t-transparent animate-spin" />
+                  ) : (
+                    <span className="text-white/30 shrink-0">○</span>
+                  )}
+                  <span
+                    className={`truncate ${
+                      s.status === "done"
+                        ? "text-white/80"
+                        : s.status === "running"
+                          ? "shimmer-text font-semibold"
+                          : "text-white/40"
+                    }`}
+                  >
+                    {s.titulo}
+                    {s.status === "done" && s.citas != null ? ` · ${s.citas} citas` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {autoDone && autoDone.status === "done" && (
+        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm animate-pop">
+          ⚡ <b>Investigación automática completada</b> — versión{" "}
+          {autoDone.result?.version_number}: {autoDone.result?.tareas} investigaciones
+          insertadas, +{autoDone.result?.palabras_agregadas?.toLocaleString("es-PY")}{" "}
+          palabras, {autoDone.result?.citas} citas. El contenido ya está en el editor.
+          <div className="mt-2 flex gap-2 flex-wrap">
+            <Link
+              href={`/projects/${params.id}/document/versions`}
+              className="btn-secondary text-xs px-3 py-1.5"
+            >
+              Ver cambios en el historial
+            </Link>
+            <button className="btn-ghost text-xs px-3 py-1.5" onClick={() => setAutoDone(null)}>
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+      {autoDone && autoDone.status === "failed" && (
+        <div className="rounded-md bg-brand-primary-light border border-brand-primary/30 px-4 py-2.5 text-sm animate-fade">
+          ⚡ <b>La investigación automática falló:</b> {autoDone.last_error || "error desconocido"}
+          <button className="btn-ghost text-xs px-2 py-1 ml-2" onClick={() => setAutoDone(null)}>
+            Cerrar
+          </button>
+        </div>
+      )}
+      {autoDone && autoDone.status === "cancelled" && (
+        <div className="rounded-md bg-brand-bg border border-brand-border px-4 py-2.5 text-sm animate-fade text-brand-slate">
+          ⚡ Investigación automática cancelada — el documento quedó liberado, sin cambios.
+          <button className="btn-ghost text-xs px-2 py-1 ml-2" onClick={() => setAutoDone(null)}>
+            Cerrar
+          </button>
         </div>
       )}
       {finalEditing && (
@@ -785,6 +983,18 @@ export default function DocumentPage() {
         </div>
         {editable && (
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+            <button
+              className="btn px-4 py-1.5 text-xs whitespace-nowrap text-white order-1 bg-gradient-to-r from-brand-ink to-[#2a2f3a] hover:from-black hover:to-brand-ink shadow-soft"
+              onClick={() => setAutoDialog(true)}
+              disabled={dirty}
+              title={
+                dirty
+                  ? "Guardá los cambios antes de lanzar el modo automático"
+                  : "El agente investiga por su cuenta y lo inserta en el documento (cola de fondo)"
+              }
+            >
+              ⚡ Modo automático
+            </button>
             <button
               data-tour="edicion-final"
               className="btn-editorial !py-1.5 text-xs whitespace-nowrap order-1"
@@ -1336,6 +1546,73 @@ export default function DocumentPage() {
         </aside>
         )}
       </div>
+
+      {/* ⚡ Diálogo del modo automático */}
+      {autoDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          onClick={() => setAutoDialog(false)}
+        >
+          <div className="absolute inset-0 bg-brand-ink/40 backdrop-blur-sm" />
+          <div
+            className="relative card w-full max-w-xl p-6 animate-pop"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-xl uppercase text-brand-ink">
+                  ⚡ Modo automático
+                </h2>
+                <p className="text-xs text-brand-slate mt-1 leading-relaxed">
+                  Describí <b>qué investigar y qué insertar</b>. El agente arma el plan,
+                  investiga con las fuentes del proyecto, la web y Perplexity, y guarda
+                  el resultado como <b>versión nueva</b> del documento.
+                </p>
+              </div>
+              <button
+                className="h-7 w-7 rounded-md hover:bg-brand-bg text-brand-slate text-sm font-bold shrink-0"
+                onClick={() => setAutoDialog(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <textarea
+              autoFocus
+              className="input min-h-[120px] mt-4"
+              placeholder={
+                "Ej.: Investigá las tarifas por hora-agente de BPO en Paraguay, Colombia y " +
+                "Perú (2023-2026), compará con el costo interno del sector financiero y " +
+                "insertá los hallazgos en la sección Evidencia, con sus fuentes."
+              }
+              value={autoBrief}
+              onChange={(e) => setAutoBrief(e.target.value)}
+            />
+            <div className="text-[10px] text-brand-mist mt-1 text-right">
+              {autoBrief.trim().length}/4000 · mínimo 20 caracteres
+            </div>
+
+            <div className="rounded-lg bg-brand-bg/70 border border-brand-border p-3 mt-2 text-[11px] text-brand-slate leading-relaxed space-y-1">
+              <div>🔒 El documento queda <b>bloqueado para edición</b> mientras trabaja.</div>
+              <div>⏳ Entra en <b>cola</b> y corre en el servidor: podés navegar o cerrar la pestaña.</div>
+              <div>📄 El resultado es una <b>versión nueva revisable</b> (el historial compara los cambios) y te avisa con una 🔔.</div>
+            </div>
+
+            <div className="flex gap-2 mt-4">
+              <button
+                className="btn-primary flex-1"
+                onClick={launchAuto}
+                disabled={autoBrief.trim().length < 20 || autoLaunching}
+              >
+                {autoLaunching ? "Encolando…" : "⚡ Lanzar investigación automática"}
+              </button>
+              <button className="btn-secondary" onClick={() => setAutoDialog(false)}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Visita guiada (bienvenida / post-edición APA) */}
       {tourSteps && <GuidedTour steps={tourSteps} onClose={closeTour} />}

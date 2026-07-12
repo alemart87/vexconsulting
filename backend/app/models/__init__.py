@@ -18,3 +18,4 @@ from .export_job import ExportJob  # noqa: F401
 from .chat import ChatChannel, ChatMessage, ChatRead  # noqa: F401
 from .notification import Notification  # noqa: F401
 from .knowhub import KnowHubItem  # noqa: F401
+from .auto_mission import AutoMission  # noqa: F401
