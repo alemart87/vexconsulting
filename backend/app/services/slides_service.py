@@ -218,15 +218,47 @@ h1,h2,.num,.valor{font-family:"Barlow Condensed",Impact,sans-serif;text-transfor
 .toolbar button{border:1px solid rgba(120,120,130,.5);background:rgba(255,255,255,.85);backdrop-filter:blur(8px);
   color:#0F1116;border-radius:8px;padding:7px 12px;font:600 12px "Manrope",sans-serif;cursor:pointer}
 .toolbar button:hover{border-color:var(--accent);color:var(--accent)}
-/* Impresión: una slide por página, sin animaciones ni cromo */
+/* ===== Impresión (Exportar PDF): A4 apaisado, una slide por página =====
+   Claves: print-color-adjust conserva degradados y fondos; las medidas de
+   pantalla usan vmin (colapsan al imprimir), así que acá TODO se redefine
+   en milímetros sobre la página de 297×210 mm. */
 @media print{
-  @page{size:297mm 167mm;margin:0}
-  html,body{background:#fff}
+  @page{size:A4 landscape;margin:0}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  html,body{background:#fff;height:auto}
   .deck{position:static;overflow:visible}
   .slide{position:relative;inset:auto;opacity:1!important;transform:none!important;visibility:visible!important;
-    width:297mm;height:166mm;page-break-after:always;transition:none}
+    pointer-events:auto;width:297mm;height:209mm;padding:16mm 22mm;page-break-after:always;
+    break-inside:avoid;transition:none;overflow:hidden}
+  .slide:last-child{page-break-after:auto}
   .slide .stagger>*,.slide ul li{opacity:1!important;transform:none!important;transition:none!important}
+  .stagger{width:100%;max-width:none}
   .progress,.hud,.toolbar{display:none!important}
+  /* Portada */
+  .portada .kicker{font-size:4mm;margin-bottom:8mm}
+  .portada h1{font-size:26mm}
+  .portada .sub{font-size:7mm;margin-top:7mm}
+  .portada .meta{margin-top:14mm;font-size:4.5mm;padding-top:4mm}
+  /* Sección */
+  .seccion .num{font-size:44mm}
+  .seccion h2{font-size:20mm}
+  /* Títulos y bullets */
+  .contenido h2,.cifras h2,.cierre h2{font-size:14mm;margin-bottom:9mm;padding-bottom:4mm}
+  .contenido h2::after,.cifras h2::after,.cierre h2::after{width:18mm;height:1.6mm}
+  .contenido ul,.cierre ul{font-size:6.4mm;line-height:1.45}
+  .contenido li,.cierre li{padding:3.4mm 0 3.4mm 11mm}
+  .contenido li::before,.cierre li::before{left:1mm;top:5mm;width:5mm;height:5mm;border-width:.7mm;border-radius:1.6mm}
+  .contenido .nota{margin-top:7mm;font-size:4.4mm}
+  /* Cifras */
+  .kpis{gap:7mm}
+  .kpi{padding:9mm 8mm;border-radius:4mm;border-top-width:2mm}
+  .kpi .valor{font-size:17mm}
+  .kpi .etiqueta{font-size:5.4mm;margin-top:2.5mm}
+  .kpi .fuente{font-size:4mm;margin-top:2mm}
+  /* Cita */
+  .cita blockquote{font-size:13mm}
+  .cita .autor{margin-top:8mm;font-size:5.5mm}
+  .cierre .meta{margin-top:10mm;font-size:4.5mm}
 }
 </style>
 </head>
@@ -320,6 +352,13 @@ async def generate_slides(
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"slides-{uuid.uuid4().hex}.html"
     path.write_text(html_out, encoding="utf-8")
+    # El deck se guarda aparte: el endpoint re-renderiza con la plantilla
+    # VIGENTE al servir — las mejoras de diseño aplican retroactivamente.
+    path.with_suffix(".json").write_text(
+        json.dumps({"deck": deck, "style": style, "project": project_name},
+                   ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     return {
         "title": f"{deck.get('titulo') or project_name} · {theme['label']} · {len(deck['slides'])} slides",

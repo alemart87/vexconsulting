@@ -190,6 +190,7 @@ async def delete_item(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artefacto no encontrado")
     if item.file_path:
         Path(item.file_path).unlink(missing_ok=True)
+        Path(item.file_path).with_suffix(".json").unlink(missing_ok=True)
     await db.delete(item)
     await db.commit()
     return {"ok": True}
@@ -205,15 +206,35 @@ async def view_slides(
     if (not item or item.project_id != project_id or item.kind != "slides"
             or not item.file_path or not Path(item.file_path).exists()):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Presentación no disponible")
-    if dl:
-        return FileResponse(
-            item.file_path, media_type="text/html",
-            filename=f"presentacion-v{item.version}.html",
+
+    # Si el deck JSON está guardado, se re-renderiza con la plantilla VIGENTE
+    # (las mejoras de diseño aplican también a presentaciones ya generadas).
+    html_text: str
+    deck_path = Path(item.file_path).with_suffix(".json")
+    if deck_path.exists():
+        import json as _json
+
+        from ...services.slides_service import render_slides_html
+
+        data = _json.loads(deck_path.read_text(encoding="utf-8"))
+        html_text = render_slides_html(
+            data.get("deck") or {}, data.get("style") or "corporativa",
+            data.get("project") or "Proyecto",
         )
-    return HTMLResponse(
-        Path(item.file_path).read_text(encoding="utf-8"),
-        headers={"Cache-Control": "private, max-age=3600"},
-    )
+    else:
+        html_text = Path(item.file_path).read_text(encoding="utf-8")
+
+    headers = {
+        "Cache-Control": "private, max-age=300",
+        # El middleware global manda DENY (setdefault): acá se permite el
+        # embed SOLO desde la propia app (vista previa en el KnowHub).
+        "X-Frame-Options": "SAMEORIGIN",
+    }
+    if dl:
+        headers["Content-Disposition"] = (
+            f'attachment; filename="presentacion-v{item.version}.html"'
+        )
+    return HTMLResponse(html_text, headers=headers)
 
 
 @router.get("/projects/{project_id}/knowhub/{item_id}/audio")
