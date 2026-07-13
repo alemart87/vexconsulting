@@ -49,14 +49,61 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Señales de una ENTRADA de referencia: ítem de lista, enlace markdown,
+# URL suelta o año entre paréntesis estilo APA «(2024)».
+_REF_SIGNAL_RE = re.compile(
+    r"(^\s*([-*+]|\d+\.)\s)|(\]\()|(https?://)|(\(\d{4}[a-z]?\))"
+)
+_BOLD_TITLE_RE = re.compile(r"^\*\*[^*]+\*\*[:.]?$")
+
+
+def _block_is_reference(block: list[str]) -> bool:
+    """¿Este bloque (párrafos entre líneas en blanco) es una entrada o lista
+    de referencias, o es CONTENIDO que no debería vivir ahí?
+
+    Contenido seguro de estar mal ubicado: tablas, imágenes, citas en bloque,
+    líneas-título en negrita y prosa sin enlaces/años. Las referencias reales
+    (ítems con link, párrafos APA con año) se quedan donde están."""
+    nonempty = [l.strip() for l in block if l.strip()]
+    if not nonempty:
+        return True
+    for line in nonempty:
+        if line.startswith("|") or line.startswith(">") or line.startswith("!["):
+            return False  # tabla, cita o imagen: nunca es una referencia
+        if _BOLD_TITLE_RE.fullmatch(line):
+            return False  # título en negrita (así insertan los modelos a veces)
+    # Entrada(s) de referencia: TODAS las líneas traen señal de referencia
+    return all(_REF_SIGNAL_RE.search(line) for line in nonempty)
+
+
+def _block_label(block: list[str]) -> str:
+    """Etiqueta corta del bloque para informar qué se movió."""
+    for line in block:
+        s = line.strip()
+        if not s:
+            continue
+        m = re.match(r"^#{1,4}\s+(.*)$", s)
+        if m:
+            return m.group(1).strip()[:80]
+        if s.startswith("|"):
+            return "tabla"
+        s = re.sub(r"[*_>#|]", "", s).strip()
+        return (s[:60] + "…") if len(s) > 60 else s
+    return "bloque"
+
+
 def repair_structure(md: str) -> tuple[str, list[str]]:
     """Repara el ORDEN del documento de forma determinista (sin IA, sin tocar
-    una letra del contenido): todo bloque con título que haya quedado dentro o
-    después de las secciones terminales (Referencias, Anexos, Bibliografía…)
-    se muda al final del CUERPO, justo antes de la primera terminal.
+    una letra del contenido): todo CONTENIDO que haya quedado dentro o después
+    de las secciones terminales (Referencias, Anexos, Bibliografía…) se muda
+    al final del CUERPO, justo antes de la primera terminal.
 
-    Devuelve (markdown_reparado, títulos_movidos). Si no hay nada que mover,
-    devuelve el documento intacto y lista vacía."""
+    Detecta tanto secciones con título (## / ###) como contenido suelto
+    (párrafos, títulos en negrita, tablas, citas, imágenes) — que es como
+    suele quedar cuando una integración salió mal. Las entradas de referencia
+    reales (ítems con enlaces, párrafos APA con año) no se tocan.
+
+    Devuelve (markdown_reparado, etiquetas_movidas)."""
     from .agent.integrator import _is_terminal_title
 
     lines = md.splitlines()
@@ -74,22 +121,36 @@ def repair_structure(md: str) -> tuple[str, list[str]]:
     if term_idx is None:
         return md, []
 
-    # Bloques mal ubicados: encabezados NO terminales que aparecen después de
-    # la primera terminal. Cada bloque va desde su título hasta el siguiente
-    # encabezado (del nivel que sea) o el final del documento.
-    blocks: list[tuple[int, int, str]] = []
+    # Recorrer la región terminal por unidades: secciones con título completo,
+    # o bloques separados por líneas en blanco, clasificados uno a uno.
+    blocks: list[tuple[int, int, str]] = []  # (start, end, etiqueta)
     i = term_idx + 1
     while i < len(lines):
+        if not lines[i].strip():
+            i += 1
+            continue
         m = heading(lines[i])
-        if m and not _is_terminal_title(m.group(2)):
-            start, title = i, m.group(2).strip()
+        if m:
+            if _is_terminal_title(m.group(2)):
+                i += 1
+                continue
+            # Sección con título no terminal: mal ubicada entera (hasta el
+            # próximo encabezado del nivel que sea)
             j = i + 1
             while j < len(lines) and not heading(lines[j]):
                 j += 1
-            blocks.append((start, j, title))
+            blocks.append((i, j, m.group(2).strip()[:80]))
             i = j
-        else:
-            i += 1
+            continue
+        # Bloque sin título: hasta la próxima línea en blanco o encabezado
+        j = i
+        while j < len(lines) and lines[j].strip() and not heading(lines[j]):
+            j += 1
+        block = lines[i:j]
+        if not _block_is_reference(block):
+            blocks.append((i, j, _block_label(block)))
+        i = j
+
     if not blocks:
         return md, []
 
@@ -101,7 +162,8 @@ def repair_structure(md: str) -> tuple[str, list[str]]:
 
     flat: list[str] = []
     for b in extracted:
-        flat += ["", *b, ""]
+        flat += ["", *b]
+    flat.append("")
     lines[term_idx:term_idx] = flat
 
     out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).rstrip() + "\n"
