@@ -678,4 +678,19 @@ async def mentionables(
         .limit(50)
     )
     notes = [{"id": nid, "title": title, "status": st} for nid, title, st in notes_rows]
-    return {"users": users, "notes": notes}
+
+    # Reuniones de Vex Meet: mencionables con @ para traer la memoria de las
+    # decisiones a la conversación del equipo.
+    from ...models.meeting import Meeting
+
+    meetings_rows = await db.execute(
+        select(Meeting.id, Meeting.title, Meeting.meeting_date)
+        .where(Meeting.project_id == project_id)
+        .order_by(Meeting.meeting_date.desc())
+        .limit(30)
+    )
+    meetings = [
+        {"id": mid, "title": title, "meeting_date": md}
+        for mid, title, md in meetings_rows
+    ]
+    return {"users": users, "notes": notes, "meetings": meetings}

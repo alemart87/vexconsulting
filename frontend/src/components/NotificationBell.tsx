@@ -6,7 +6,7 @@ import { apiFetch } from "@/lib/api";
 
 interface Notif {
   id: string;
-  kind: "chat" | "mencion" | "nota";
+  kind: "chat" | "mencion" | "nota" | "reunion" | string;
   title: string;
   body?: string | null;
   link?: string | null;
@@ -23,7 +23,7 @@ function timeAgo(iso: string): string {
   return `hace ${Math.floor(s / 86400)} d`;
 }
 
-const KIND_ICON: Record<string, string> = { chat: "💬", mencion: "@", nota: "📌" };
+const KIND_ICON: Record<string, string> = { chat: "💬", mencion: "@", nota: "📌", reunion: "📅" };
 
 /** Campana de notificaciones: mensajes de chat, menciones y notas nuevas.
  *  Solo muestra las NO leídas; al abrirlas se marcan leídas y desaparecen. */
