@@ -238,8 +238,11 @@ async def _plan_tasks(brief: str, project_name: str, doc_md: str) -> tuple[list[
 
 def _insert_into_md(doc_md: str, seccion: str, titulo: str, body: str) -> str:
     """Inserta el bloque al FINAL de la sección destino; si no existe la
-    sección, lo agrega al final del documento. Determinista: nada de que un
-    modelo reescriba el documento entero."""
+    sección, lo agrega al final del CUERPO (antes de Referencias/Anexos — nunca
+    después: eso desordenaba el documento). Determinista: nada de que un modelo
+    reescriba el documento entero."""
+    from ..services.agent.integrator import end_of_body
+
     block = f"\n\n### {titulo}\n\n{body.strip()}\n"
     lines = doc_md.splitlines()
     target = (seccion or "").strip().lower()
@@ -260,7 +263,8 @@ def _insert_into_md(doc_md: str, seccion: str, titulo: str, body: str) -> str:
                     end = j
                     break
             return "\n".join(lines[:end]).rstrip() + block + "\n" + "\n".join(lines[end:])
-    return doc_md.rstrip() + block
+    at = end_of_body(lines)
+    return ("\n".join(lines[:at]).rstrip() + block + "\n" + "\n".join(lines[at:])).rstrip() + "\n"
 
 
 async def _check_cancelled(mission_id: str) -> bool:

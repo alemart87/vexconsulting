@@ -49,6 +49,65 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def repair_structure(md: str) -> tuple[str, list[str]]:
+    """Repara el ORDEN del documento de forma determinista (sin IA, sin tocar
+    una letra del contenido): todo bloque con título que haya quedado dentro o
+    después de las secciones terminales (Referencias, Anexos, Bibliografía…)
+    se muda al final del CUERPO, justo antes de la primera terminal.
+
+    Devuelve (markdown_reparado, títulos_movidos). Si no hay nada que mover,
+    devuelve el documento intacto y lista vacía."""
+    from .agent.integrator import _is_terminal_title
+
+    lines = md.splitlines()
+
+    def heading(line: str) -> re.Match | None:
+        return re.match(r"^(#{1,4})\s+(.*)$", line.strip())
+
+    # Primera sección terminal: ahí termina el cuerpo
+    term_idx = None
+    for i, line in enumerate(lines):
+        m = heading(line)
+        if m and _is_terminal_title(m.group(2)):
+            term_idx = i
+            break
+    if term_idx is None:
+        return md, []
+
+    # Bloques mal ubicados: encabezados NO terminales que aparecen después de
+    # la primera terminal. Cada bloque va desde su título hasta el siguiente
+    # encabezado (del nivel que sea) o el final del documento.
+    blocks: list[tuple[int, int, str]] = []
+    i = term_idx + 1
+    while i < len(lines):
+        m = heading(lines[i])
+        if m and not _is_terminal_title(m.group(2)):
+            start, title = i, m.group(2).strip()
+            j = i + 1
+            while j < len(lines) and not heading(lines[j]):
+                j += 1
+            blocks.append((start, j, title))
+            i = j
+        else:
+            i += 1
+    if not blocks:
+        return md, []
+
+    moved_titles = [b[2] for b in blocks]
+    extracted: list[list[str]] = []
+    for start, end, _title in reversed(blocks):
+        extracted.insert(0, lines[start:end])
+        del lines[start:end]
+
+    flat: list[str] = []
+    for b in extracted:
+        flat += ["", *b, ""]
+    lines[term_idx:term_idx] = flat
+
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).rstrip() + "\n"
+    return out, moved_titles
+
+
 def _lock_active(doc: Document) -> bool:
     if not doc.lock_user_id or not doc.lock_expires_at:
         return False

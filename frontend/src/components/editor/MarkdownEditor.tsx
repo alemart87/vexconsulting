@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { BubbleMenu, EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import LinkExt from "@tiptap/extension-link";
@@ -19,6 +19,9 @@ interface Props {
   editable: boolean;
   onDirty?: (dirty: boolean) => void;
   onRequestAi?: (contextText: string, insert: (text: string) => void) => void;
+  /** Al seleccionar texto: burbuja «Profundizar con IA» → abre una conversación
+   *  específica del investigador sobre esa sección. */
+  onDeepDive?: (selection: string) => void;
   /** Conteo de palabras en vivo (debounced) — para la barra de estado. */
   onStats?: (stats: { words: number; chars: number }) => void;
   /** Modo enfoque: tipografía más grande y cómoda para escribir largo. */
@@ -72,6 +75,7 @@ export default function MarkdownEditor({
   editable,
   onDirty,
   onRequestAi,
+  onDeepDive,
   onStats,
   zen,
   editorRef,
@@ -455,6 +459,31 @@ export default function MarkdownEditor({
             </div>
           )}
         </div>
+      )}
+      {/* Burbuja al seleccionar texto: conversación de profundización sobre
+          esa sección con el investigador (funciona también en solo-lectura) */}
+      {onDeepDive && (
+        <BubbleMenu
+          editor={editor}
+          tippyOptions={{ duration: 120, placement: "top" }}
+          shouldShow={({ state }) => {
+            const { from, to } = state.selection;
+            return to - from > 0 && state.doc.textBetween(from, to, "\n").trim().length >= 20;
+          }}
+        >
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              const { from, to } = editor.state.selection;
+              const selected = editor.state.doc.textBetween(from, to, "\n").trim();
+              if (selected) onDeepDive(selected.slice(0, 6000));
+            }}
+            className="px-3 py-1.5 rounded-full bg-brand-ink text-white text-xs font-bold shadow-elevated border border-white/20 hover:bg-brand-cyan transition-colors flex items-center gap-1.5"
+          >
+            🔎 Profundizar con IA
+          </button>
+        </BubbleMenu>
       )}
       <EditorContent
         editor={editor}

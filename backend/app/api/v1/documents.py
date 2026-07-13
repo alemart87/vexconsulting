@@ -286,6 +286,40 @@ async def request_final_edit(
     return DocumentOut.model_validate(doc)
 
 
+@router.post("/repair-structure")
+async def repair_structure(
+    project_id: str,
+    request: Request,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Repara el ORDEN del documento sin IA y sin tocar el contenido: los
+    bloques que quedaron mal insertados dentro o después de Referencias/Anexos
+    se mudan al final del cuerpo. Guarda una versión nueva revisable (el
+    historial muestra el diff y siempre se puede volver atrás)."""
+    doc = await document_service.get_or_create_document(db, project_id)
+    if not (doc.content_md or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El documento está vacío")
+
+    fixed_md, moved = document_service.repair_structure(doc.content_md or "")
+    if not moved:
+        return {"moved": [], "version_number": None,
+                "detail": "La estructura ya está en orden: no hay nada que mover."}
+
+    version = await document_service.save_document(
+        db, doc, access.user, content_md=fixed_md, base_version_id=None,
+        summary=f"Reparación de estructura: {len(moved)} bloque(s) movidos antes de las referencias",
+        force=True,
+    )
+    await log_action(
+        db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
+        action="document.repair", project_id=project_id, entity_type="version",
+        entity_id=version.id, detail={"moved": moved[:20], "version": version.version_number},
+        ip=client_ip(request),
+    )
+    return {"moved": moved, "version_number": version.version_number}
+
+
 @router.post("/integrate")
 async def integrate_content(
     project_id: str,
