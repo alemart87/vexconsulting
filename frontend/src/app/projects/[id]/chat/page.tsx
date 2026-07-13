@@ -30,7 +30,11 @@ interface Msg {
   user_photo_url?: string | null;
   content: string;
   deleted?: boolean;
-  mentions?: { users?: { id: string; name: string }[]; notes?: { id: string; title: string }[] };
+  mentions?: {
+    users?: { id: string; name: string }[];
+    notes?: { id: string; title: string }[];
+    meetings?: { id: string; title: string }[];
+  };
   parent_id?: string | null;
   reactions?: Record<string, string[]>;
   attachments?: Attachment[] | null;
@@ -52,10 +56,11 @@ interface SearchHit {
 interface Mentionable {
   users: { id: string; name: string }[];
   notes: { id: string; title: string; status: string }[];
+  meetings?: { id: string; title: string; meeting_date: string }[];
 }
 
 const EMOJI_ONLY = /^[\p{Extended_Pictographic}‍️\s]{1,8}$/u;
-const MENTION_RE = /(@[\wÁÉÍÓÚáéíóúÑñ📝][^\s,.;:!?]*(?:\s[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúÑñ]*)?)/g;
+const MENTION_RE = /(@[\wÁÉÍÓÚáéíóúÑñ📝📅][^\s,.;:!?]*(?:\s[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúÑñ]*)?)/g;
 const QUICK_REACTIONS = ["👍", "✅", "❤️", "😂", "👀", "🔥"];
 
 const minutesBetween = (a?: string, b?: string) =>
@@ -307,9 +312,9 @@ export default function ChatPage() {
   const [active, setActive] = useState<Channel | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText] = useState("");
-  const [mentionables, setMentionables] = useState<Mentionable>({ users: [], notes: [] });
+  const [mentionables, setMentionables] = useState<Mentionable>({ users: [], notes: [], meetings: [] });
   const [mentionFilter, setMentionFilter] = useState<string | null>(null);
-  const [pendingMentions, setPendingMentions] = useState<Msg["mentions"]>({ users: [], notes: [] });
+  const [pendingMentions, setPendingMentions] = useState<Msg["mentions"]>({ users: [], notes: [], meetings: [] });
   const [newTopic, setNewTopic] = useState("");
   const [showNewDm, setShowNewDm] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -434,6 +439,17 @@ export default function ChatPage() {
         setActive(target ?? list[0]);
       })
       .catch(() => {});
+    // ?mention_meeting=... (botón «Comentar en el chat» de Vex Meet):
+    // el composer arranca con la reunión ya mencionada
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const meetId = sp.get("mention_meeting");
+      const meetTitle = sp.get("mention_title");
+      if (meetId && meetTitle) {
+        setText(`@📅${meetTitle} `);
+        setPendingMentions({ users: [], notes: [], meetings: [{ id: meetId, title: meetTitle }] });
+      }
+    }
     apiFetch<Mentionable>(`/api/v1/projects/${params.id}/chat/mentionables`)
       .then(setMentionables)
       .catch(() => {});
@@ -538,7 +554,7 @@ export default function ChatPage() {
     setText("");
     const mentions = pendingMentions;
     const attachments = pendingFiles;
-    setPendingMentions({ users: [], notes: [] });
+    setPendingMentions({ users: [], notes: [], meetings: [] });
     setPendingFiles([]);
     nearBottomRef.current = true;
     try {
@@ -684,12 +700,17 @@ export default function ChatPage() {
     if (ch) setActive(ch);
   };
 
-  const applyMention = (kind: "user" | "note", item: any) => {
-    const label = kind === "user" ? `@${item.name}` : `@📝${item.title}`;
+  const applyMention = (kind: "user" | "note" | "meeting", item: any) => {
+    const label =
+      kind === "user" ? `@${item.name}` : kind === "note" ? `@📝${item.title}` : `@📅${item.title}`;
     setText((t) => t.replace(/@[\wÁÉÍÓÚáéíóúÑñ]*$/, `${label} `));
     setPendingMentions((prev) => ({
       users: kind === "user" ? [...(prev?.users || []), { id: item.id, name: item.name }] : prev?.users || [],
       notes: kind === "note" ? [...(prev?.notes || []), { id: item.id, title: item.title }] : prev?.notes || [],
+      meetings:
+        kind === "meeting"
+          ? [...(prev?.meetings || []), { id: item.id, title: item.title }]
+          : prev?.meetings || [],
     }));
     setMentionFilter(null);
   };
@@ -721,6 +742,9 @@ export default function ChatPage() {
   );
   const filteredNotes = mentionables.notes.filter(
     (n) => mentionFilter !== null && n.title.toLowerCase().includes(mentionFilter)
+  );
+  const filteredMeetings = (mentionables.meetings || []).filter(
+    (m) => mentionFilter !== null && m.title.toLowerCase().includes(mentionFilter)
   );
 
   const channelButton = (c: Channel, icon: string) => (
@@ -1091,9 +1115,10 @@ export default function ChatPage() {
                         )}
                         <MsgMarkdown content={m.content} mine={mine} />
                         <AttachmentList list={m.attachments} mine={mine} />
-                        {m.mentions?.notes && m.mentions.notes.length > 0 && (
+                        {((m.mentions?.notes?.length ?? 0) > 0 ||
+                          (m.mentions?.meetings?.length ?? 0) > 0) && (
                           <div className="flex gap-1 flex-wrap mt-1.5">
-                            {m.mentions.notes.map((n) => (
+                            {(m.mentions?.notes || []).map((n) => (
                               <Link
                                 key={n.id}
                                 href={`/projects/${params.id}/notes`}
@@ -1102,6 +1127,17 @@ export default function ChatPage() {
                                 }`}
                               >
                                 📝 {n.title}
+                              </Link>
+                            ))}
+                            {(m.mentions?.meetings || []).map((mt) => (
+                              <Link
+                                key={mt.id}
+                                href={`/projects/${params.id}/meet?open=${mt.id}`}
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                                  mine ? "bg-white/20 text-white" : "bg-brand-purple/10 text-brand-purple"
+                                }`}
+                              >
+                                📅 {mt.title}
                               </Link>
                             ))}
                           </div>
@@ -1163,7 +1199,8 @@ export default function ChatPage() {
 
         {/* Composer con autocompletado de menciones */}
         <div className="border-t border-brand-border p-3 relative">
-          {mentionFilter !== null && (filteredUsers.length > 0 || filteredNotes.length > 0) && (
+          {mentionFilter !== null &&
+            (filteredUsers.length > 0 || filteredNotes.length > 0 || filteredMeetings.length > 0) && (
             <div className="absolute bottom-full left-3 right-3 mb-1 glass rounded-xl max-h-48 overflow-y-auto animate-pop z-10">
               {filteredUsers.map((u) => (
                 <button
@@ -1181,6 +1218,18 @@ export default function ChatPage() {
                   onClick={() => applyMention("note", n)}
                 >
                   📝 {n.title} <span className="badge-neutral ml-1">{n.status}</span>
+                </button>
+              ))}
+              {filteredMeetings.map((mt) => (
+                <button
+                  key={mt.id}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-brand-bg"
+                  onClick={() => applyMention("meeting", mt)}
+                >
+                  📅 {mt.title}
+                  <span className="text-brand-mist ml-1 text-xs">
+                    {mt.meeting_date ? parseApiDate(mt.meeting_date).toLocaleDateString("es-PY") : ""}
+                  </span>
                 </button>
               ))}
             </div>

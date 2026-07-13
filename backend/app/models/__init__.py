@@ -19,3 +19,4 @@ from .chat import ChatChannel, ChatMessage, ChatRead  # noqa: F401
 from .notification import Notification  # noqa: F401
 from .knowhub import KnowHubItem  # noqa: F401
 from .auto_mission import AutoMission  # noqa: F401
+from .meeting import Meeting  # noqa: F401
