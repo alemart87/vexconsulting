@@ -28,6 +28,11 @@ tablas, conclusiones, resúmenes — y emití una operación "actualizar" por ca
 texto que quedó viejo (p. ej. buscar «2021–2025» y reemplazarlo por «2021–2026»).
 - No inventes datos: usá únicamente el contenido provisto y lo que ya está en \
 el documento.
+- ORDEN DEL DOCUMENTO (obligatorio): «Referencias», «Bibliografía», «Anexos», \
+«Apéndices» y «Glosario» son secciones TERMINALES que cierran el documento. \
+PROHIBIDO insertar hallazgos, análisis, tablas o secciones nuevas dentro o \
+después de ellas — en "Referencias" solo pueden entrar entradas de referencia. \
+Todo contenido sustantivo va en las secciones del cuerpo, ANTES de las terminales.
 
 Operaciones disponibles:
 - "agregar": suma el contenido al FINAL de la sección indicada (título EXACTO \
@@ -53,6 +58,29 @@ Respondé SOLO JSON:
    {"seccion": "<título existente>", "modo": "actualizar", "buscar": "<texto literal>", "contenido": "<reemplazo>"} |
    {"seccion_nueva": "<título>", "despues_de": "<título existente>", "contenido": "<markdown>"}
  ]}"""
+
+
+# Secciones terminales: SIEMPRE cierran el documento. Nada se inserta después.
+TERMINAL_TITLES = (
+    "referencias", "bibliografía", "bibliografia", "fuentes consultadas",
+    "anexo", "anexos", "apéndice", "apendice", "apéndices", "apendices", "glosario",
+)
+
+
+def _is_terminal_title(title: str) -> bool:
+    t = re.sub(r"^[\d.\s]+", "", (title or "").strip().lower())
+    return any(t == x or t.startswith(f"{x} ") or t.startswith(f"{x}:") for x in TERMINAL_TITLES)
+
+
+def end_of_body(lines: list[str]) -> int:
+    """Índice donde termina el CUERPO del documento: justo antes de la primera
+    sección terminal (Referencias, Anexos…). Agregar «al final» significa acá —
+    nunca después de las referencias (era la causa del documento desordenado)."""
+    for i, line in enumerate(lines):
+        m = re.match(r"^(#{1,4})\s+(.*)$", line.strip())
+        if m and _is_terminal_title(m.group(2)):
+            return i
+    return len(lines)
 
 
 def _find_section(lines: list[str], title: str) -> tuple[int, int, int] | None:
@@ -131,15 +159,19 @@ def apply_ops(doc_md: str, ops: list[dict]) -> tuple[str, list[str]]:
             after = _find_section(lines, str(op.get("despues_de") or ""))
             block = ["", f"## {title}", "", contenido, ""]
             if after:
-                lines[after[2]:after[2]] = block
+                # «después de X» tampoco puede caer más allá del cuerpo
+                at = min(after[2], end_of_body(lines))
+                lines[at:at] = block
             else:
-                lines += block
+                at = end_of_body(lines)
+                lines[at:at] = block
             applied.append(title)
             continue
         loc = _find_section(lines, str(op.get("seccion") or ""))
         if not loc:
-            lines += ["", contenido, ""]
-            applied.append(str(op.get("seccion") or "final del documento"))
+            at = end_of_body(lines)
+            lines[at:at] = ["", contenido, ""]
+            applied.append(str(op.get("seccion") or "final del cuerpo"))
             continue
         start, _level, end = loc
         if op.get("modo") == "reemplazar":

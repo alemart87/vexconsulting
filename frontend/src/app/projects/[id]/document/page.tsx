@@ -490,6 +490,9 @@ export default function DocumentPage() {
     status?: "running" | "done" | "failed";
   }
   const [convId, setConvId] = useState<string | null>(null);
+  // Fragmento seleccionado en el editor para «Profundizar con IA» (contexto
+  // fijo de la PRÓXIMA consulta; el hilo después sigue con su propia memoria)
+  const [deepDive, setDeepDive] = useState<string | null>(null);
   const [convList, setConvList] = useState<{ id: string; title: string; updated_at: string }[]>([]);
   const [thread, setThread] = useState<ResearchTurn[]>([]);
   const [rigor, setRigor] = useState<"estandar" | "academico">("estandar");
@@ -833,6 +836,37 @@ export default function DocumentPage() {
     }
   };
 
+  // ---- 🧹 Reparar orden: mueve bloques mal insertados después de
+  // Referencias/Anexos al final del cuerpo (determinista, versión revisable)
+  const [repairing, setRepairing] = useState(false);
+  const repairStructure = async () => {
+    if (repairing || dirty) return;
+    setRepairing(true);
+    setStatus("");
+    try {
+      const res = await apiFetch<{ moved: string[]; version_number: number | null; detail?: string }>(
+        `/api/v1/projects/${params.id}/document/repair-structure`,
+        { method: "POST" }
+      );
+      if (!res.moved.length) {
+        setStatus(res.detail || "La estructura ya está en orden: no hay nada que mover.");
+      } else {
+        const d = await apiFetch<Doc>(`/api/v1/projects/${params.id}/document`);
+        setDoc(d);
+        setEditorKey((k) => k + 1);
+        setStatus(
+          `🧹 Estructura reparada (versión ${res.version_number}): ${res.moved.length} bloque(s) ` +
+            `reubicados antes de las referencias — ${res.moved.slice(0, 3).join(" · ")}` +
+            `${res.moved.length > 3 ? "…" : ""}. Revisable en el historial.`
+        );
+      }
+    } catch (e: any) {
+      setStatus(`Reparación: ${e.message}`);
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   // Polling mientras la edición final corre (el trabajo vive en el servidor)
   useEffect(() => {
     if (!finalEditing) return;
@@ -982,7 +1016,9 @@ export default function DocumentPage() {
         method: "POST",
         body: JSON.stringify({
           query,
-          context_text: info?.context || undefined,
+          context_text: deepDive
+            ? `SECCIÓN SELECCIONADA DEL DOCUMENTO (el consultor pide profundizarla):\n"""\n${deepDive}\n"""`
+            : info?.context || undefined,
           engine: "vex",
           rigor,
           conversation_id: convId || undefined,
@@ -995,6 +1031,7 @@ export default function DocumentPage() {
         }),
       });
       setAttachments([]);
+      setDeepDive(null); // la sección ya viajó como contexto; el hilo sigue con su memoria
       const isNewConversation = !convId;
       setConvId(res.conversation_id);
       // La investigación quedó registrada y corre en el servidor: el hilo
@@ -1018,6 +1055,31 @@ export default function DocumentPage() {
     setConvId(null);
     setThread([]);
     setPanelError("");
+    setDeepDive(null);
+  };
+
+  // ---- 🔎 Profundizar sección: el consultor selecciona un fragmento del
+  // documento y se abre una conversación ESPECÍFICA con el investigador sobre
+  // esa sección (con memoria de hilo y búsqueda web incluidas).
+  const handleDeepDive = (selection: string) => {
+    setFocusMode(false);
+    setPanelTab("investigador");
+    setConvId(null);
+    setThread([]);
+    setPanelError("");
+    setDeepDive(selection);
+    setAiQuery(
+      "Profundizá esta sección: ampliá con más evidencia, cifras actualizadas y fuentes verificables."
+    );
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('[data-tour="panel-ia"]')?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      document
+        .querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')
+        ?.focus();
+    });
   };
 
   /** Separa el cuerpo de la lista de fuentes (la lista solo se muestra en modo lectura). */
@@ -1505,6 +1567,18 @@ export default function DocumentPage() {
                 <>✦ Edición final APA</>
               )}
             </button>
+            <button
+              className="btn-ghost !py-1.5 text-xs whitespace-nowrap order-1"
+              onClick={repairStructure}
+              disabled={repairing || dirty}
+              title={
+                dirty
+                  ? "Guardá los cambios antes de reparar el orden"
+                  : "Si algo quedó insertado después de Referencias o Anexos, lo mueve al final del cuerpo. Sin IA: no toca una letra del contenido, y crea una versión revisable."
+              }
+            >
+              {repairing ? "Ordenando…" : "🧹 Reparar orden"}
+            </button>
             <input
               className="input flex-1 min-w-[140px] sm:!w-64 sm:flex-none !py-1.5 text-xs order-3 sm:order-2"
               placeholder="Resumen del cambio (opcional)"
@@ -1569,6 +1643,7 @@ export default function DocumentPage() {
               editable={editable}
               onDirty={handleDirty}
               onStats={handleStats}
+              onDeepDive={handleDeepDive}
               zen={focusMode}
               editorRef={editorRef}
             />
@@ -1781,6 +1856,27 @@ export default function DocumentPage() {
                             ● Grabando… tocá 🎙 para terminar
                           </span>
                         )}
+                      </div>
+                    )}
+                    {deepDive && (
+                      <div className="rounded-md border border-brand-cyan/40 bg-brand-cyan/5 px-2.5 py-1.5 flex items-start gap-2">
+                        <span className="text-[11px] shrink-0 mt-0.5">🔎</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider2 text-brand-cyan">
+                            Profundizar sección seleccionada ·{" "}
+                            {deepDive.trim().split(/\s+/).length} palabras
+                          </div>
+                          <p className="text-[11px] text-brand-slate truncate">
+                            «{deepDive.slice(0, 110)}…»
+                          </p>
+                        </div>
+                        <button
+                          className="text-brand-slate hover:text-brand-primary shrink-0"
+                          title="Quitar la sección del contexto"
+                          onClick={() => setDeepDive(null)}
+                        >
+                          ✕
+                        </button>
                       </div>
                     )}
                     <div className="flex gap-2 items-end" data-tour="composer">
