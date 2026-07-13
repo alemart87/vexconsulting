@@ -26,7 +26,8 @@ class DocumentVersion(Base):
     diff_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Autor denormalizado: la versión sobrevive al borrado del usuario.
-    author_id: Mapped[str] = mapped_column(String(36))
+    # 64 y no 36: la autoría puede ser el agente automático («auto:<uuid>» = 41).
+    author_id: Mapped[str] = mapped_column(String(64))
     author_name: Mapped[str] = mapped_column(String(255))
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     words_added: Mapped[int] = mapped_column(Integer, default=0)

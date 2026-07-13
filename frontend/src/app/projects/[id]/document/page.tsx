@@ -269,6 +269,7 @@ export default function DocumentPage() {
     started_at?: string | null;
     stage_note?: string | null;
     heartbeat_at?: string | null;
+    events?: { t: string; text: string }[];
   }
   const AUTO_ACTIVE = ["pending", "running", "cancelling"];
   const [autoMission, setAutoMission] = useState<AutoMission | null>(null);
@@ -328,8 +329,8 @@ export default function DocumentPage() {
       Math.floor((Date.now() - parseApiDate(startedIso0).getTime()) / 1000)
     );
     let pct = 2;
-    let stage = "En cola";
-    let detail = "Esperando el turno del motor de investigación (una misión por vez).";
+    let stage = "Arrancando";
+    let detail = "El motor de investigación está tomando la misión (una por vez).";
     let warn: string | null = null;
     if (autoMission.status !== "pending") {
       if (!n) {
@@ -372,14 +373,15 @@ export default function DocumentPage() {
     // ¿El motor da señales de vida? Late cada 15 s: sin latido por >90 s,
     // está muerto o colgado y Cancelar pasa a forzar el corte al instante.
     const hbIso = autoMission.heartbeat_at;
+    const hbAgeS = hbIso
+      ? Math.max(0, Math.floor((Date.now() - parseApiDate(hbIso).getTime()) / 1000))
+      : null;
     const hbStale =
-      autoMission.status !== "pending" &&
-      !!hbIso &&
-      Date.now() - parseApiDate(hbIso).getTime() > 90_000;
+      autoMission.status !== "pending" && hbAgeS != null && hbAgeS > 90;
     if (hbStale) {
       warn =
-        "El motor de investigación no da señales de vida. Tocá Cancelar para " +
-        "forzar el corte y liberar el documento, y relanzá la investigación.";
+        "El motor de investigación no da señales de vida. El sistema lo corta y " +
+        "libera el documento solo en ~1 minuto — o tocá «Forzar corte» ahora.";
     }
     if (autoMission.status === "cancelling") {
       stage = "Cancelando";
@@ -401,58 +403,13 @@ export default function DocumentPage() {
       const k = n || 3;
       eta = `~${Math.ceil(k * 1.5 + 1)}–${Math.ceil(k * 2.5 + 2)} min estimados`;
     }
-    // Avance «seccionado»: el recorrido completo siempre a la vista, con la
-    // fase activa girando — el usuario ve qué se hizo, qué corre y qué falta.
-    const note = autoMission.stage_note || "";
-    const doneTasks = steps.filter((s) => s.status === "done").length;
-    const inPrep = note.startsWith("Preparando");
-    const inPlan = note.startsWith("Planificando");
-    const inIntegrate = note.startsWith("Integrando");
-    const inSave = note.startsWith("Guardando");
-    const started = autoMission.status !== "pending";
-    type PhaseState = "done" | "running" | "pending";
-    const phases: { label: string; state: PhaseState }[] = [
-      {
-        label: "Preparación del documento",
-        state: !started ? "pending" : inPrep ? "running" : "done",
-      },
-      {
-        label: "Plan de investigación",
-        state: n ? "done" : inPlan ? "running" : "pending",
-      },
-      ...(n
-        ? steps.map((s) => ({
-            label:
-              s.titulo +
-              (s.status === "done" && s.citas != null ? ` — ${s.citas} citas` : ""),
-            state: (s.status === "done"
-              ? "done"
-              : s.status === "running"
-                ? "running"
-                : "pending") as PhaseState,
-          }))
-        : [
-            {
-              label: "Tareas de investigación (las define el plan)",
-              state: "pending" as PhaseState,
-            },
-          ]),
-      {
-        label: "Integración en el documento",
-        state: inSave
-          ? "done"
-          : inIntegrate || (n > 0 && doneTasks === n)
-            ? "running"
-            : "pending",
-      },
-      { label: "Guardado de la versión nueva", state: inSave ? "running" : "pending" },
-    ];
-    if (inSave) {
-      pct = 97;
-      stage = "Etapa 3 de 3 · Guardado";
-    }
-    return { pct, stage, detail, elapsed, eta, warn, hbStale, phases };
+    return { pct, stage, detail, elapsed, eta, warn, hbStale, hbAgeS };
   })();
+
+  const agoLabel = (iso: string) => {
+    const s = Math.max(0, Math.floor((Date.now() - parseApiDate(iso).getTime()) / 1000));
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min`;
+  };
 
   const fmtDuration = (seg?: number) => {
     if (seg == null) return "";
@@ -1145,7 +1102,22 @@ export default function DocumentPage() {
               <span className="text-xs font-bold text-brand-cyan">{autoView.stage}</span>
               <span className="text-xs text-white/75 ml-2">{autoView.detail}</span>
             </div>
-            <span className="text-[11px] text-white/50 tabular-nums shrink-0">
+            <span className="text-[11px] text-white/50 tabular-nums shrink-0 flex items-center gap-2">
+              {/* Latido del motor: verde = vivo, ámbar = demorado, rojo = sin señales */}
+              {autoView.hbAgeS != null && (
+                <span className="flex items-center gap-1">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      autoView.hbAgeS <= 45
+                        ? "bg-emerald-400 animate-pulse"
+                        : autoView.hbAgeS <= 90
+                          ? "bg-amber-400"
+                          : "bg-red-500"
+                    }`}
+                  />
+                  latido hace {autoView.hbAgeS} s
+                </span>
+              )}
               {autoView.elapsed} transcurridos · {autoView.eta}
             </span>
           </div>
@@ -1156,30 +1128,59 @@ export default function DocumentPage() {
             </div>
           )}
 
-          <div className="mt-2 pt-2 border-t border-white/10 grid gap-1 sm:grid-cols-2">
-            {autoView.phases.map((p, i) => (
-              <div key={i} className="flex items-center gap-2 text-[11px] min-w-0">
-                {p.state === "done" ? (
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-                ) : p.state === "running" ? (
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-brand-cyan border-t-transparent animate-spin" />
-                ) : (
-                  <span className="h-2 w-2 shrink-0 rounded-full border border-white/30" />
-                )}
-                <span
-                  className={`truncate ${
-                    p.state === "done"
-                      ? "text-white/80"
-                      : p.state === "running"
-                        ? "shimmer-text font-semibold"
-                        : "text-white/40"
-                  }`}
-                >
-                  {p.label}
-                </span>
-              </div>
-            ))}
-          </div>
+          {autoMission.steps.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-white/10 grid gap-1 sm:grid-cols-2">
+              {autoMission.steps.map((s, i) => (
+                <div key={i} className="flex items-center gap-2 text-[11px] min-w-0">
+                  {s.status === "done" ? (
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                  ) : s.status === "running" ? (
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-brand-cyan border-t-transparent animate-spin" />
+                  ) : (
+                    <span className="h-2 w-2 shrink-0 rounded-full border border-white/30" />
+                  )}
+                  <span
+                    className={`truncate ${
+                      s.status === "done"
+                        ? "text-white/80"
+                        : s.status === "running"
+                          ? "shimmer-text font-semibold"
+                          : "text-white/40"
+                    }`}
+                  >
+                    {s.titulo}
+                    {s.status === "done" && s.citas != null ? ` — ${s.citas} citas` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Feed de actividad en vivo (estilo Claude Code): cada acción del
+              motor — búsquedas, gráficos, hitos — con su antigüedad */}
+          {(autoMission.events?.length ?? 0) > 0 && (
+            <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
+              {autoMission.events!.slice(-5).map((e, i, arr) => {
+                const last = i === arr.length - 1;
+                return (
+                  <div
+                    key={`${e.t}-${i}`}
+                    className={`flex items-start gap-1.5 text-[11px] leading-snug ${
+                      last ? "text-brand-cyan" : "text-white/45"
+                    }`}
+                  >
+                    <span className="shrink-0">{last ? "▸" : "·"}</span>
+                    <span className={`min-w-0 break-words ${last ? "shimmer-text" : ""}`}>
+                      {e.text}
+                    </span>
+                    <span className="ml-auto shrink-0 tabular-nums text-white/30">
+                      hace {agoLabel(e.t)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="text-[10px] text-white/40 mt-1.5">
             El documento queda bloqueado para edición hasta que termine. Podés navegar a
             cualquier parte: el trabajo corre en el servidor y al final llega una
@@ -2105,7 +2106,7 @@ export default function DocumentPage() {
 
             <div className="rounded-lg bg-brand-bg/70 border border-brand-border p-3 mt-2 text-[11px] text-brand-slate leading-relaxed space-y-1">
               <div><b>Bloqueo:</b> el documento queda cerrado para edición mientras trabaja.</div>
-              <div><b>Cola:</b> corre en el servidor — podés navegar o cerrar la pestaña sin perder nada.</div>
+              <div><b>En segundo plano:</b> corre en el servidor — podés navegar o cerrar la pestaña sin perder nada.</div>
               <div><b>Resultado:</b> una versión nueva revisable (el historial compara los cambios) y una notificación al terminar, con la duración total.</div>
             </div>
 
@@ -2115,7 +2116,7 @@ export default function DocumentPage() {
                 onClick={launchAuto}
                 disabled={autoBrief.trim().length < 20 || autoLaunching}
               >
-                {autoLaunching ? "Encolando…" : "Lanzar investigación automática"}
+                {autoLaunching ? "Iniciando…" : "Lanzar investigación automática"}
               </button>
               <button className="btn-secondary" onClick={() => setAutoDialog(false)}>
                 Cancelar

@@ -28,7 +28,7 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(50), index=True)
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     entity_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    entity_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)

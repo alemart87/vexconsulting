@@ -35,6 +35,7 @@ def _out(m: AutoMission) -> dict:
         "created_at": m.created_at, "started_at": m.started_at,
         "finished_at": m.finished_at,
         "stage_note": m.stage_note, "heartbeat_at": m.heartbeat_at,
+        "events": (m.events or [])[-12:],
     }
 
 

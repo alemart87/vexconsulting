@@ -18,3 +18,14 @@ class AgentContext:
     citations: list[dict[str, Any]] = field(default_factory=list)  # citas web acumuladas por las tools
     extra_cost_usd: float = 0.0  # costo de tools externas (Perplexity)
     focus_source_ids: list[str] = field(default_factory=list)  # fuentes citadas con @ (restricción del RAG)
+    # Callback opcional de progreso: las tools reportan qué están haciendo
+    # (el modo automático lo usa para el feed de actividad en vivo).
+    on_activity: Any = None
+
+    async def report(self, text: str) -> None:
+        if self.on_activity is None:
+            return
+        try:
+            await self.on_activity(text)
+        except Exception:  # el progreso nunca voltea una investigación
+            pass
