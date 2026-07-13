@@ -23,10 +23,11 @@ const GROUPS = [
     ],
   },
   {
-    label: "Colaboración",
+    label: "Vex Cowork",
     accent: "#00B2BF",
     tabs: [
       { href: "/chat", label: "Chat equipo" },
+      { href: "/meet", label: "Vex Meet" },
       { href: "/agent", label: "Agente IA" },
       { href: "/knowhub", label: "KnowHub" },
     ],
@@ -144,7 +145,10 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                   className="w-full appearance-none rounded-lg bg-white text-brand-ink font-semibold text-sm border-l-4 border-l-brand-primary border border-brand-border shadow-soft pl-4 pr-10 py-3 focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 >
                   {visibleGroups.map((g) => (
-                    <optgroup key={g.label} label={`Zona de ${g.label.toLowerCase()}`}>
+                    <optgroup
+                      key={g.label}
+                      label={g.label === "Vex Cowork" ? g.label : `Zona de ${g.label.toLowerCase()}`}
+                    >
                       {g.tabs.map((t) => (
                         <option
                           key={t.href}
