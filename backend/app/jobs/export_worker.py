@@ -25,10 +25,12 @@ def signal_export_queue() -> None:
 
 
 def _export_in_subprocess(fmt: str, content_md: str, title: str, author_note: str,
-                          output_path: str, upload_root: str, project_id: str) -> None:
+                          output_path: str, upload_root: str, project_id: str,
+                          options: dict | None = None) -> None:
     from app.services.export.renderer import run_export
 
-    run_export(fmt, content_md, title, author_note, output_path, upload_root, project_id)
+    run_export(fmt, content_md, title, author_note, output_path, upload_root,
+               project_id, options)
 
 
 async def recover_stale_exports() -> None:
@@ -77,11 +79,13 @@ async def _process(job_id: str, pool: ProcessPoolExecutor) -> None:
         title = project.name if project else "Documento"
         project_id = job.project_id
         fmt = job.format
+        options = job.options or None
 
     out_dir = settings.export_path / project_id
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    output_path = str(out_dir / f"{stamp}-v{vnum}.{fmt}")
+    ext = "pdf" if fmt == "paper" else fmt
+    output_path = str(out_dir / f"{stamp}-v{vnum}.{ext}")
     author_note = f"Versión {vnum} · exportado {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')} UTC"
 
     loop = asyncio.get_running_loop()
@@ -89,7 +93,7 @@ async def _process(job_id: str, pool: ProcessPoolExecutor) -> None:
         await asyncio.wait_for(
             loop.run_in_executor(
                 pool, _export_in_subprocess, fmt, content, title, author_note,
-                output_path, str(settings.upload_path), project_id,
+                output_path, str(settings.upload_path), project_id, options,
             ),
             timeout=settings.upload_proc_timeout_s,
         )
