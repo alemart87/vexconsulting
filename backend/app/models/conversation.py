@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
 
-AGENT_TYPES = ("acompanante", "evaluador", "visualizador", "investigacion")
+AGENT_TYPES = ("acompanante", "evaluador", "visualizador", "investigacion", "cowork")
 
 
 def _uuid() -> str:
@@ -37,6 +37,9 @@ class Message(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     conversation_id: Mapped[str] = mapped_column(String(36), index=True)
     role: Mapped[str] = mapped_column(String(10))  # user | assistant
+    # Autor humano del mensaje (Agente Cowork: varias personas en el mismo hilo)
+    author_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    author_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content: Mapped[str] = mapped_column(Text)
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_calls: Mapped[dict | None] = mapped_column(JSON, nullable=True)

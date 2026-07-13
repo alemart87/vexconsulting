@@ -49,31 +49,39 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# Señales de una ENTRADA de referencia: ítem de lista, enlace markdown,
-# URL suelta o año entre paréntesis estilo APA «(2024)».
-_REF_SIGNAL_RE = re.compile(
-    r"(^\s*([-*+]|\d+\.)\s)|(\]\()|(https?://)|(\(\d{4}[a-z]?\))"
-)
 _BOLD_TITLE_RE = re.compile(r"^\*\*[^*]+\*\*[:.]?$")
+_LIST_ITEM_RE = re.compile(r"^\s*([-*+]|\d+\.)\s")
+# Entrada APA: «Autor, A. (2024).» — el año aparece temprano en la línea
+_APA_START_RE = re.compile(r"^[^()\n]{0,120}\(\d{4}[a-z]?\)")
+_LINKISH_RE = re.compile(r"(\]\()|(https?://)")
+
+
+def _line_is_reference(s: str) -> bool:
+    """¿Esta línea es una ENTRADA de referencia (se queda en Referencias) o
+    contenido mal ubicado (se muda al cuerpo)?
+
+    - ítems de lista = referencia (así se listan las fuentes)
+    - «Autor (2024).» al inicio = referencia estilo APA
+    - línea CORTA con enlace/URL = referencia
+    - prosa larga —aunque traiga citas con link adentro—, tablas, imágenes,
+      citas en bloque y títulos en negrita = contenido mal ubicado"""
+    if s.startswith("|") or s.startswith(">") or s.startswith("!["):
+        return False
+    if _BOLD_TITLE_RE.fullmatch(s):
+        return False
+    if _LIST_ITEM_RE.match(s):
+        return True
+    if _APA_START_RE.match(s):
+        return True
+    return bool(_LINKISH_RE.search(s)) and len(s) <= 240
 
 
 def _block_is_reference(block: list[str]) -> bool:
-    """¿Este bloque (párrafos entre líneas en blanco) es una entrada o lista
-    de referencias, o es CONTENIDO que no debería vivir ahí?
-
-    Contenido seguro de estar mal ubicado: tablas, imágenes, citas en bloque,
-    líneas-título en negrita y prosa sin enlaces/años. Las referencias reales
-    (ítems con link, párrafos APA con año) se quedan donde están."""
+    """Un bloque es de referencias solo si TODAS sus líneas lo son."""
     nonempty = [l.strip() for l in block if l.strip()]
     if not nonempty:
         return True
-    for line in nonempty:
-        if line.startswith("|") or line.startswith(">") or line.startswith("!["):
-            return False  # tabla, cita o imagen: nunca es una referencia
-        if _BOLD_TITLE_RE.fullmatch(line):
-            return False  # título en negrita (así insertan los modelos a veces)
-    # Entrada(s) de referencia: TODAS las líneas traen señal de referencia
-    return all(_REF_SIGNAL_RE.search(line) for line in nonempty)
+    return all(_line_is_reference(line) for line in nonempty)
 
 
 def _block_label(block: list[str]) -> str:
