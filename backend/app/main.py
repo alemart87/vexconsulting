@@ -58,6 +58,8 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("auto_missions", "heartbeat_at", "TIMESTAMPTZ"),
     ("auto_missions", "events", "JSON"),
     ("export_jobs", "options", "JSON"),
+    ("messages", "author_id", "VARCHAR(64)"),
+    ("messages", "author_name", "VARCHAR(255)"),
 ]
 
 # Sentencias idempotentes que corren en cada arranque (solo Postgres).
@@ -227,7 +229,7 @@ app.include_router(versions_router.router, prefix=API)
 app.include_router(audit_router.router, prefix=API)
 
 # Routers de fases 2-4 se montan si existen (import tolerante durante el desarrollo)
-for module_name in ("sources", "search", "notes", "gantt", "agent", "auto", "evaluations", "exports", "metrics", "files", "chat", "notifications", "knowhub", "meetings"):
+for module_name in ("sources", "search", "notes", "gantt", "agent", "auto", "evaluations", "exports", "metrics", "files", "chat", "notifications", "knowhub", "meetings", "cowork"):
     try:
         module = __import__(f"app.api.v1.{module_name}", fromlist=["router"])
         app.include_router(module.router, prefix=API)
