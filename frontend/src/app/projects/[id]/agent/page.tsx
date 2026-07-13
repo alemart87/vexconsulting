@@ -41,14 +41,32 @@ interface Member {
 const hhmm = (iso: string) =>
   parseApiDate(iso).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" });
 
+/** Avatar del Agente Cowork: monograma V con degradado de marca y anillo
+ *  animado — corporativo y vivo (el anillo late más rápido cuando piensa). */
+function AgentAvatar({ size = "sm", active = false }: { size?: "sm" | "lg"; active?: boolean }) {
+  const box = size === "lg" ? "h-16 w-16 text-2xl" : "h-8 w-8 text-[13px]";
+  return (
+    <div className={`${box} shrink-0 relative rounded-full flex items-center justify-center`}>
+      <span
+        className={`absolute inset-0 rounded-full opacity-40 ${active ? "animate-ping" : "animate-pulse"}`}
+        style={{
+          background: "conic-gradient(from 180deg, #00B2BF, #662483, #E6332A, #00B2BF)",
+          animationDuration: active ? "1.2s" : "3s",
+        }}
+      />
+      <span
+        className="absolute inset-0 rounded-full shadow-soft"
+        style={{ background: "linear-gradient(135deg, #00B2BF 0%, #662483 60%, #0F1116 100%)" }}
+      />
+      <span className="relative font-black text-white select-none" style={{ fontFamily: "inherit" }}>
+        V
+      </span>
+    </div>
+  );
+}
+
 function Avatar({ name, url, agent }: { name?: string | null; url?: string | null; agent?: boolean }) {
-  if (agent) {
-    return (
-      <div className="h-8 w-8 shrink-0 rounded-full bg-brand-ink text-white flex items-center justify-center text-sm shadow-soft">
-        🤖
-      </div>
-    );
-  }
+  if (agent) return <AgentAvatar />;
   return url ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={url} alt={name || ""} title={name || ""}
@@ -90,6 +108,8 @@ export default function CoworkAgentPage() {
       );
       if (activeRef.current === cid) {
         setMessages((prev) => {
+          // nunca pisar mensajes optimistas (el server todavía no los tiene)
+          if (msgs.length < prev.length) return prev;
           // solo re-render si cambió (evita saltos de scroll)
           if (prev.length === msgs.length && prev[prev.length - 1]?.id === msgs[msgs.length - 1]?.id)
             return prev;
@@ -158,7 +178,22 @@ export default function CoworkAgentPage() {
 
   const send = async () => {
     const content = text.trim();
-    if (!content || thinking || !active) return;
+    if (!content || thinking) return;
+    // Sin hilo activo: se crea SOLO al enviar el primer mensaje (cero fricción)
+    let convId = active;
+    if (!convId) {
+      try {
+        const c = await apiFetch<Conv>(`/api/v1/projects/${params.id}/cowork/conversations`, {
+          method: "POST",
+        });
+        setConvs((prev) => [c, ...prev]);
+        setActive(c.id);
+        convId = c.id;
+      } catch (e: any) {
+        setError(e.message || "No se pudo abrir la conversación");
+        return;
+      }
+    }
     setText("");
     setError("");
     const mentions = pendingMentions;
@@ -177,7 +212,7 @@ export default function CoworkAgentPage() {
     setThinking(true);
     try {
       const res = await apiFetch<{ user_message: Msg; assistant_message: Msg }>(
-        `/api/v1/projects/${params.id}/cowork/conversations/${active}/messages`,
+        `/api/v1/projects/${params.id}/cowork/conversations/${convId}/messages`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -214,8 +249,8 @@ export default function CoworkAgentPage() {
       <div className="card overflow-hidden">
         <div className="p-3 border-b border-brand-border">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="font-display uppercase text-brand-ink leading-none text-sm">
-              🤖 Agente Cowork
+            <h2 className="font-display uppercase text-brand-ink leading-none text-sm flex items-center gap-2">
+              <AgentAvatar /> Agente Cowork
             </h2>
             <button className="btn-primary !py-1.5 !px-3 text-xs" onClick={newConversation}>
               + Nueva
@@ -243,7 +278,7 @@ export default function CoworkAgentPage() {
               <div className="text-[13px] font-bold text-brand-ink truncate">{c.title}</div>
               {c.last_message && (
                 <div className="text-[11px] text-brand-slate truncate mt-0.5">
-                  {c.last_role === "assistant" ? "🤖 " : ""}
+                  {c.last_role === "assistant" ? "✦ " : ""}
                   {c.last_message}
                 </div>
               )}
@@ -277,7 +312,9 @@ export default function CoworkAgentPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-thin">
           {messages.length === 0 && !thinking && (
             <div className="h-full flex flex-col items-center justify-center text-center px-6">
-              <div className="text-4xl mb-2">🤖</div>
+              <div className="mb-3">
+                <AgentAvatar size="lg" />
+              </div>
               <p className="font-display uppercase text-brand-ink text-sm">
                 Charlemos sobre el documento
               </p>
@@ -342,7 +379,7 @@ export default function CoworkAgentPage() {
           })}
           {thinking && (
             <div className="flex gap-2.5">
-              <Avatar agent />
+              <AgentAvatar active />
               <div className="rounded-2xl rounded-tl-sm bg-brand-bg-soft border border-brand-border px-3.5 py-2 text-[13px] text-brand-slate">
                 <span className="shimmer-text font-semibold">Leyendo el documento y pensando…</span>
               </div>
@@ -390,11 +427,7 @@ export default function CoworkAgentPage() {
             <textarea
               className="input !py-2 text-[13px] resize-none flex-1"
               rows={2}
-              placeholder={
-                active
-                  ? "Preguntale al agente por el documento… Usá @ para sumar a un compañero"
-                  : "Creá una conversación para empezar"
-              }
+              placeholder="Preguntale al agente por el documento… Usá @ para sumar a un compañero"
               value={text}
               onChange={(e) => onTextChange(e.target.value)}
               onKeyDown={(e) => {
@@ -404,9 +437,9 @@ export default function CoworkAgentPage() {
                   send();
                 }
               }}
-              disabled={thinking || !active}
+              disabled={thinking}
             />
-            <button className="btn-primary !py-2.5" disabled={thinking || !text.trim() || !active}
+            <button className="btn-primary !py-2.5" disabled={thinking || !text.trim()}
               onClick={send}>
               {thinking ? "…" : "Enviar"}
             </button>
