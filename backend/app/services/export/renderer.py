@@ -316,12 +316,178 @@ def export_pdf(content_md: str, title: str, author_note: str, output_path: str,
     HTML(string=html, base_url=upload_root).write_pdf(output_path)
 
 
+# ---------------------------------------------------------------------------
+# PAPER: publicación ligera (LinkedIn, clientes) — sin normas APA, sin índice.
+# Portada con logo (Voicenter o personalizado), título grande y tarjeta de
+# autor con foto abajo. Tipografía cómoda de lectura, marca sobria.
+# ---------------------------------------------------------------------------
+
+VOICENTER_LOGO = Path(__file__).resolve().parents[2] / "assets" / "logo-voicenter-color.png"
+
+PAPER_CSS = """
+@page {
+  size: A4;
+  margin: 20mm 20mm 20mm 20mm;
+  @bottom-left { content: "__BRAND__"; font-size: 8pt; color: #9AA0AE; }
+  @bottom-right { content: counter(page) " / " counter(pages); font-size: 8pt; color: #9AA0AE; }
+}
+@page cover { @bottom-left { content: none; } @bottom-right { content: none; } margin: 0; }
+body { font-family: 'DejaVu Sans', sans-serif; font-size: 10.5pt; color: #2A2F3A; line-height: 1.7; }
+
+/* ---- Portada ---- */
+.paper-cover { page: cover; page-break-after: always; position: relative;
+  height: 297mm; padding: 22mm 20mm 18mm 20mm; box-sizing: border-box; }
+.paper-cover .logo { height: 16mm; max-width: 70mm; object-fit: contain; object-position: left; }
+.paper-cover .accent { height: 1.6mm; width: 34mm; background: #E6332A; margin-top: 10mm; }
+.paper-cover h1 { font-size: 30pt; line-height: 1.12; color: #0F1116; margin: 8mm 0 0 0;
+  border: none; text-transform: none; font-weight: 800; }
+.paper-cover .subtitle { font-size: 13pt; color: #5B6275; margin-top: 6mm; line-height: 1.5; }
+.paper-cover .footer { position: absolute; bottom: 18mm; left: 20mm; right: 20mm; }
+.paper-cover .author { display: flex; align-items: center; gap: 6mm;
+  border-top: 0.4mm solid #E5E7EB; padding-top: 6mm; }
+.paper-cover .author img.photo { width: 22mm; height: 22mm; border-radius: 50%;
+  object-fit: cover; border: 1mm solid #fff; box-shadow: 0 1mm 3mm rgba(15,17,22,.18); }
+.paper-cover .author .initials { width: 22mm; height: 22mm; border-radius: 50%;
+  background: #662483; color: #fff; text-align: center; line-height: 22mm;
+  font-size: 15pt; font-weight: 800; }
+.paper-cover .author .name { font-size: 12.5pt; font-weight: 800; color: #0F1116; }
+.paper-cover .author .role { font-size: 9.5pt; color: #5B6275; margin-top: 1mm; }
+.paper-cover .date { font-size: 9pt; color: #9AA0AE; margin-top: 4mm; }
+
+/* ---- Cuerpo ---- */
+h1, h2, h3 { color: #0F1116; line-height: 1.2; page-break-after: avoid; font-weight: 800; }
+h1 { font-size: 17pt; margin-top: 22px; border: none; text-transform: none; }
+h2 { font-size: 14pt; margin-top: 20px; text-transform: none; }
+h2::before { content: ""; display: inline-block; width: 5mm; height: 1.2mm;
+  background: #E6332A; margin-right: 2.5mm; vertical-align: middle; }
+h3 { font-size: 11.5pt; margin-top: 14px; }
+p { margin: 8px 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9pt; page-break-inside: avoid; }
+th { background: #0F1116; color: #fff; border: 1px solid #0F1116; padding: 6px 8px; text-align: left; }
+td { border: 1px solid #E5E7EB; padding: 6px 8px; }
+tr:nth-child(even) td { background: #F9FAFC; }
+blockquote { border-left: 3px solid #E6332A; margin: 14px 0; padding: 2px 14px;
+  color: #414855; font-size: 11.5pt; }
+img { max-width: 100%; }
+a { color: #00B2BF; text-decoration: none; }
+code { background: #F6F7FB; padding: 1px 4px; border-radius: 3px; font-size: 9pt; color: #662483; }
+
+/* ---- Cierre con autor ---- */
+.paper-end { margin-top: 14mm; border-top: 0.4mm solid #E5E7EB; padding-top: 6mm;
+  display: flex; align-items: center; gap: 5mm; page-break-inside: avoid; }
+.paper-end img.photo { width: 16mm; height: 16mm; border-radius: 50%; object-fit: cover; }
+.paper-end .initials { width: 16mm; height: 16mm; border-radius: 50%; background: #662483;
+  color: #fff; text-align: center; line-height: 16mm; font-size: 11pt; font-weight: 800; }
+.paper-end .name { font-weight: 800; font-size: 10.5pt; color: #0F1116; }
+.paper-end .role { font-size: 9pt; color: #5B6275; }
+.paper-end img.logo { height: 9mm; max-width: 42mm; object-fit: contain; margin-left: auto; }
+"""
+
+
+def _author_avatar(photo_uri: str | None, autor: str, css_class: str) -> str:
+    if photo_uri:
+        return f'<img class="photo" src="{photo_uri}" alt="{_esc(autor)}"/>'
+    initials = "".join(w[0] for w in (autor or "V").split()[:2]).upper()
+    return f'<div class="initials {css_class}">{_esc(initials)}</div>'
+
+
+def paper_html(content_md: str, opts: dict, upload_root: str, project_id: str) -> str:
+    """HTML del paper: portada (logo + título + autor con foto abajo) + cuerpo."""
+    from datetime import datetime, timezone
+
+    from markdown_it import MarkdownIt
+
+    titulo = str(opts.get("titulo") or "Paper")
+    subtitulo = str(opts.get("subtitulo") or "")
+    autor = str(opts.get("autor") or "")
+    cargo = str(opts.get("cargo") or "")
+
+    # Logo: Voicenter empaquetado, o el archivo subido por el consultor
+    logo_uri = VOICENTER_LOGO.as_uri() if VOICENTER_LOGO.exists() else ""
+    logo_name = str(opts.get("logo") or "voicenter")
+    if logo_name != "voicenter" and "/" not in logo_name and ".." not in logo_name:
+        custom = Path(upload_root) / project_id / "paper" / logo_name
+        if custom.exists():
+            logo_uri = custom.as_uri()
+
+    photo_uri = None
+    foto = str(opts.get("foto") or "")
+    if foto and "/" not in foto and ".." not in foto:
+        photo_path = Path(upload_root) / project_id / "paper" / foto
+        if photo_path.exists():
+            photo_uri = photo_path.as_uri()
+
+    md = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table").enable("strikethrough")
+    body = _resolve_images(md.render(_drop_duplicate_title(content_md, titulo)), upload_root, project_id)
+
+    meses = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+             "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+    now = datetime.now(timezone.utc)
+    fecha = f"{meses[now.month - 1].capitalize()} {now.year}"
+    brand = autor or "Voicenter S.A."
+    author_html = ""
+    if autor:
+        author_html = f"""
+  <div class="author">
+    {_author_avatar(photo_uri, autor, "")}
+    <div>
+      <div class="name">{_esc(autor)}</div>
+      {f'<div class="role">{_esc(cargo)}</div>' if cargo else ''}
+    </div>
+  </div>"""
+
+    end_html = ""
+    if autor:
+        end_html = f"""
+<div class="paper-end">
+  {_author_avatar(photo_uri, autor, "")}
+  <div>
+    <div class="name">{_esc(autor)}</div>
+    {f'<div class="role">{_esc(cargo)}</div>' if cargo else ''}
+  </div>
+  {f'<img class="logo" src="{logo_uri}" alt="logo"/>' if logo_uri else ''}
+</div>"""
+
+    # La marca del pie va directo en el CSS (string-set de WeasyPrint es frágil)
+    brand_css = PAPER_CSS.replace("__BRAND__", brand.replace('"', "'")[:80])
+
+    return f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>{_esc(titulo)}</title>
+<style>{brand_css}</style></head>
+<body>
+<div class="paper-cover">
+  {f'<img class="logo" src="{logo_uri}" alt="logo"/>' if logo_uri else ''}
+  <div class="accent"></div>
+  <h1>{_esc(titulo)}</h1>
+  {f'<p class="subtitle">{_esc(subtitulo)}</p>' if subtitulo else ''}
+  <div class="footer">{author_html}
+    <p class="date">{_esc(fecha)}</p>
+  </div>
+</div>
+{body}
+{end_html}
+</body></html>"""
+
+
+def export_paper(content_md: str, opts: dict, output_path: str,
+                 upload_root: str, project_id: str) -> None:
+    """Paper ligero → PDF vía WeasyPrint."""
+    from weasyprint import HTML
+
+    html = paper_html(content_md, opts or {}, upload_root, project_id)
+    HTML(string=html, base_url=upload_root).write_pdf(output_path)
+
+
 def run_export(fmt: str, content_md: str, title: str, author_note: str,
-               output_path: str, upload_root: str, project_id: str) -> None:
+               output_path: str, upload_root: str, project_id: str,
+               options: dict | None = None) -> None:
     """Punto de entrada del subproceso."""
     if fmt == "docx":
         export_docx(content_md, title, author_note, output_path, upload_root, project_id)
     elif fmt == "pdf":
         export_pdf(content_md, title, author_note, output_path, upload_root, project_id)
+    elif fmt == "paper":
+        export_paper(content_md, {**(options or {}), "titulo": (options or {}).get("titulo") or title},
+                     output_path, upload_root, project_id)
     else:
         raise ValueError(f"Formato no soportado: {fmt}")
