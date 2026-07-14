@@ -297,7 +297,15 @@ export default function AppShell({
       <footer className="border-t border-brand-border bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 text-xs text-brand-slate flex justify-between">
           <span>© {new Date().getFullYear()} Voicenter S.A.</span>
-          <span>VEX Consulting · Investigación de mercado</span>
+          <span>
+            VEX Consulting · Investigación de mercado{" "}
+            <span
+              className="text-brand-mist font-mono"
+              title="Versión desplegada (commit)"
+            >
+              · v{process.env.NEXT_PUBLIC_BUILD || "dev"}
+            </span>
+          </span>
         </div>
       </footer>
 

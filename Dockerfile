@@ -1,6 +1,9 @@
 # === Stage 1: build frontend (Next.js standalone) ===
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
+# Render pasa las env vars como build args: el SHA queda visible en la app
+ARG RENDER_GIT_COMMIT
+ENV RENDER_GIT_COMMIT=$RENDER_GIT_COMMIT
 COPY frontend/package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
