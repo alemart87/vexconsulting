@@ -38,6 +38,10 @@ async def get_document(
     db: AsyncSession = Depends(get_db),
 ) -> DocumentOut:
     doc = await document_service.get_or_create_document(db, project_id)
+    # Recuento fresco al leer (no se persiste): así el Resumen y el editor
+    # muestran el MISMO número aunque el word_count guardado sea de una
+    # versión vieja o de la métrica anterior (que contaba sintaxis markdown).
+    doc.word_count = document_service.count_words(doc.content_md or "")
     return DocumentOut.model_validate(doc)
 
 
