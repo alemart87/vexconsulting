@@ -146,7 +146,7 @@ accionable que responda a esa instrucción, apoyado en lo que dice el documento.
 
 Respondé SOLO JSON:
 {"nombre": "<título corto del flujo>",
- "nodos": [{"id": "n1", "tipo": "inicio|proceso|decision|dato|fin|nota", "texto": "<máx 60 chars>"}],
+ "nodos": [{"id": "n1", "tipo": "inicio|proceso|decision|dato|documento|subproceso|basedatos|fin|nota", "texto": "<máx 60 chars>", "icono": "<UN emoji opcional>"}],
  "flechas": [{"de": "n1", "a": "n2", "etiqueta": "<opcional, ej. sí/no>"}]}
 
 Reglas de diseño:
@@ -154,7 +154,10 @@ Reglas de diseño:
 - las "decision" tienen 2+ salidas con etiqueta (sí/no, aprueba/rechaza…)
 - entre 8 y 22 nodos según la complejidad pedida; textos cortos y concretos
   (verbo + objeto: «Priorizar hallazgos», «¿Cliente aprueba?»)
-- "dato" para entradas/salidas de información; "nota" solo para aclaraciones clave
+- "dato" para entradas/salidas de información; "documento" para entregables
+  (informes, actas, propuestas); "subproceso" para pasos que tienen su propio
+  flujo; "basedatos" para sistemas/CRM; "nota" solo para aclaraciones clave
+- "icono": un emoji sobrio que refuerce el paso (⚙️ 📞 💬 📊 📄 👥 ✅ 🔍 💰 🎯) — opcional
 - todo nodo debe estar conectado: sin islas ni callejones sin salida (salvo los fin)"""
 
 
@@ -274,14 +277,18 @@ async def generate_flow(
             f"No se pudo generar el flujo: {str(exc)[:200]}. Reintentá.",
         )
 
-    valid_tipos = {"inicio", "proceso", "decision", "dato", "fin", "nota"}
+    valid_tipos = {"inicio", "proceso", "decision", "dato", "documento",
+                   "subproceso", "basedatos", "fin", "nota"}
     pos = _auto_layout(nodos, flechas)
     rf_nodes = [
         {
             "id": str(n["id"])[:40],
             "type": n.get("tipo") if n.get("tipo") in valid_tipos else "proceso",
             "position": {"x": pos[n["id"]][0], "y": pos[n["id"]][1]},
-            "data": {"label": str(n.get("texto") or "Paso")[:80]},
+            "data": {
+                "label": str(n.get("texto") or "Paso")[:80],
+                **({"icon": str(n["icono"])[:4]} if n.get("icono") else {}),
+            },
         }
         for n in nodos
     ]
@@ -347,6 +354,116 @@ async def generate_flow(
     )
     await db.refresh(flow)
     return {**_out(flow), "cost_usd": round(cost, 4)}
+
+
+class AssignPayload(BaseModel):
+    node_id: str = Field(min_length=1, max_length=40)
+    user_id: str = Field(min_length=1, max_length=36)
+    user_name: str = Field(min_length=1, max_length=255)
+    node_label: str = Field(default="", max_length=120)
+
+
+@router.post("/{flow_id}/assign")
+async def assign_node(
+    project_id: str,
+    flow_id: str,
+    payload: AssignPayload,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Asignar un paso del flujo a un integrante: le llega la campana con el
+    link al flow (la asignación en sí viaja en data.assignee vía autosave)."""
+    from ...services.notification_service import notify
+
+    _require_flows_access(access)
+    f = await db.get(Flow, flow_id)
+    if not f or f.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flujo no encontrado")
+    if payload.user_id != access.user.id:
+        await notify(
+            db, recipients={payload.user_id}, project_id=project_id, kind="mencion",
+            title=f"{access.user.full_name} te asignó un paso del flow «{f.name}»",
+            body=f"Paso: «{payload.node_label or 'sin título'}» · {access.project.name}",
+            link=f"/projects/{project_id}/flows",
+            entity_id=f"{flow_id}:{payload.node_id}"[:64], actor_name=access.user.full_name,
+        )
+    await db.commit()
+    return {"ok": True, "notified": payload.user_id != access.user.id}
+
+
+class InsertDocPayload(BaseModel):
+    image_url: str = Field(min_length=5, max_length=500)
+
+
+@router.post("/{flow_id}/insert-document")
+async def insert_into_document(
+    project_id: str,
+    flow_id: str,
+    payload: InsertDocPayload,
+    request: Request,
+    access: ProjectAccess = Depends(require_project_write),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Inserta el flujograma en el documento maestro DE FORMA ORDENADA: como
+    sección propia al final del cuerpo (nunca después de Referencias/Anexos),
+    con imagen, ficha y versión nueva revisable. Si ya existía una sección de
+    este flow, se reemplaza (sin duplicar)."""
+    from datetime import datetime as _dt, timezone as _tz
+
+    import re as _re
+
+    from ...services import document_service
+    from ...services.agent.integrator import end_of_body
+
+    _require_flows_access(access)
+    f = await db.get(Flow, flow_id)
+    if not f or f.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flujo no encontrado")
+
+    # Solo imágenes de ESTE proyecto (misma validación que el export)
+    prefix = f"/api/v1/projects/{project_id}/images/"
+    if not payload.image_url.startswith(prefix) or "/" in payload.image_url[len(prefix):]:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Imagen inválida")
+
+    doc = await document_service.get_or_create_document(db, project_id)
+    md = doc.content_md or ""
+    n_nodes = len((f.data or {}).get("nodes") or [])
+    fecha = _dt.now(_tz.utc).strftime("%d/%m/%Y")
+    heading = f"### Flujograma: {f.name}"
+    block = (
+        f"{heading}\n\n"
+        f"![Flujograma: {f.name}]({payload.image_url})\n\n"
+        f"*Diseñado en Vex Flows · {n_nodes} pasos · actualizado el {fecha} "
+        f"por {access.user.full_name}.*\n"
+    )
+
+    lines = md.splitlines()
+    # Reemplazo sin duplicar: si el flujograma ya estaba insertado, se actualiza
+    esc = _re.escape(heading)
+    start = next((i for i, l in enumerate(lines) if _re.fullmatch(esc, l.strip())), None)
+    if start is not None:
+        end = len(lines)
+        for j in range(start + 1, len(lines)):
+            if _re.match(r"^#{1,4}\s+", lines[j].strip()):
+                end = j
+                break
+        lines[start:end] = ["", *block.splitlines(), ""]
+    else:
+        at = end_of_body(lines)
+        lines[at:at] = ["", *block.splitlines(), ""]
+    new_md = _re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).rstrip() + "\n"
+
+    version = await document_service.save_document(
+        db, doc, access.user, content_md=new_md, base_version_id=None,
+        summary=f"Flujograma «{f.name}» insertado desde Vex Flows", force=True,
+    )
+    await log_action(
+        db, user_id=access.user.id, user_email=access.user.email, user_role=access.user.role,
+        action="flow.insert_document", project_id=project_id, entity_type="version",
+        entity_id=version.id, detail={"flow": f.name, "version": version.version_number},
+        ip=client_ip(request),
+    )
+    return {"version_number": version.version_number, "replaced": start is not None}
 
 
 @router.delete("/{flow_id}")

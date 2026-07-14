@@ -23,6 +23,8 @@ import {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  getNodesBounds,
+  getViewportForBounds,
   useReactFlow,
   type Connection,
   type Edge,
@@ -50,7 +52,14 @@ interface FlowSummary {
 const NODE_FALLBACK_SIZE: Record<string, [number, number]> = {
   inicio: [150, 42], fin: [150, 42], proceso: [180, 52],
   decision: [116, 116], dato: [170, 50], nota: [200, 64],
+  documento: [180, 56], subproceso: [190, 52], basedatos: [160, 60],
 };
+
+interface Member {
+  id: string;
+  name: string;
+  photo_url?: string | null;
+}
 
 function autoLayout(nodes: Node[], edges: Edge[]): Node[] {
   const g = new dagre.graphlib.Graph();
@@ -90,6 +99,27 @@ const handles = (
   </>
 );
 
+/** Contenido común: icono + etiqueta + chip del integrante asignado. */
+function NodeBody({ data, fallback }: { data: any; fallback: string }) {
+  const assignee = data.assignee as { id: string; name: string } | undefined;
+  return (
+    <>
+      <span>
+        {data.icon ? <span className="mr-1">{String(data.icon)}</span> : null}
+        {String(data.label || fallback)}
+      </span>
+      {assignee?.name && (
+        <span className="mt-1 flex items-center justify-center gap-1 text-[9.5px] font-semibold text-brand-slate">
+          <span className="h-4 w-4 rounded-full bg-brand-purple text-white flex items-center justify-center text-[8px] font-bold leading-none">
+            {assignee.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
+          </span>
+          {assignee.name.split(" ")[0]}
+        </span>
+      )}
+    </>
+  );
+}
+
 function ProcesoNode({ data, selected }: NodeProps) {
   return (
     <div
@@ -98,7 +128,66 @@ function ProcesoNode({ data, selected }: NodeProps) {
       }`}
       style={{ border: "1.5px solid #2A2F3A" }}
     >
-      {String(data.label || "Proceso")}
+      <NodeBody data={data} fallback="Proceso" />
+      {handles}
+    </div>
+  );
+}
+
+function DocumentoNode({ data, selected }: NodeProps) {
+  return (
+    <div
+      className={`group/node relative px-4 py-3 bg-white text-[12.5px] font-semibold text-brand-ink min-w-[150px] max-w-[240px] text-center leading-snug transition-shadow ${
+        selected ? "ring-2 ring-brand-cyan shadow-elevated" : "shadow-soft"
+      }`}
+      style={{ border: "1.5px solid #2A2F3A", borderRadius: "8px 18px 8px 8px" }}
+    >
+      {/* esquina doblada del documento */}
+      <span
+        className="absolute top-0 right-0 h-4 w-4"
+        style={{
+          background: "#EDEFF5",
+          borderLeft: "1.5px solid #2A2F3A",
+          borderBottom: "1.5px solid #2A2F3A",
+          borderRadius: "0 16px 0 8px",
+        }}
+      />
+      <NodeBody data={data} fallback="Documento" />
+      {handles}
+    </div>
+  );
+}
+
+function SubprocesoNode({ data, selected }: NodeProps) {
+  return (
+    <div
+      className={`group/node relative px-7 py-3 rounded-lg bg-white text-[12.5px] font-semibold text-brand-ink min-w-[160px] max-w-[250px] text-center leading-snug transition-shadow ${
+        selected ? "ring-2 ring-brand-cyan shadow-elevated" : "shadow-soft"
+      }`}
+      style={{ border: "1.5px solid #2A2F3A" }}
+    >
+      <span className="absolute inset-y-1.5 left-2 w-px" style={{ background: "#2A2F3A" }} />
+      <span className="absolute inset-y-1.5 right-2 w-px" style={{ background: "#2A2F3A" }} />
+      <NodeBody data={data} fallback="Subproceso" />
+      {handles}
+    </div>
+  );
+}
+
+function BaseDatosNode({ data, selected }: NodeProps) {
+  return (
+    <div
+      className={`group/node relative px-4 pt-5 pb-3 bg-white text-[12.5px] font-semibold text-brand-ink min-w-[140px] max-w-[220px] text-center leading-snug transition-shadow ${
+        selected ? "ring-2 ring-brand-cyan shadow-elevated" : "shadow-soft"
+      }`}
+      style={{ border: "1.5px solid #00B2BF", borderRadius: "14px 14px 12px 12px" }}
+    >
+      {/* arco superior del cilindro */}
+      <span
+        className="absolute left-0 right-0 top-0 h-3.5"
+        style={{ borderBottom: "1.5px solid #00B2BF", borderRadius: "0 0 50% 50%" }}
+      />
+      <NodeBody data={data} fallback="Base de datos" />
       {handles}
     </div>
   );
@@ -119,8 +208,8 @@ function DecisionNode({ data, selected }: NodeProps) {
           border: "1.5px solid #F39200",
         }}
       />
-      <div className="absolute inset-3 flex items-center justify-center px-2 text-center text-[10.5px] font-bold text-brand-ink leading-tight">
-        {String(data.label || "¿Decisión?")}
+      <div className="absolute inset-3 flex flex-col items-center justify-center px-2 text-center text-[10.5px] font-bold text-brand-ink leading-tight">
+        <NodeBody data={data} fallback="¿Decisión?" />
       </div>
       {handles}
     </div>
@@ -136,7 +225,7 @@ function pill(bg: string) {
         }`}
         style={{ background: bg }}
       >
-        {String(data.label || "")}
+        <NodeBody data={data} fallback="" />
         {handles}
       </div>
     );
@@ -155,7 +244,7 @@ function DatoNode({ data, selected }: NodeProps) {
         style={{ transform: "skewX(-14deg)", borderRadius: 6, border: "1.5px solid #662483" }}
       />
       <div className="relative px-6 py-3 text-[12.5px] font-semibold text-brand-ink text-center leading-snug">
-        {String(data.label || "Datos")}
+        <NodeBody data={data} fallback="Datos" />
       </div>
       {handles}
     </div>
@@ -181,12 +270,14 @@ function NotaNode({ data, selected }: NodeProps) {
 
 const NODE_TYPES = {
   inicio: InicioNode, proceso: ProcesoNode, decision: DecisionNode,
-  dato: DatoNode, fin: FinNode, nota: NotaNode,
+  dato: DatoNode, documento: DocumentoNode, subproceso: SubprocesoNode,
+  basedatos: BaseDatosNode, fin: FinNode, nota: NotaNode,
 };
 
 const MINIMAP_COLORS: Record<string, string> = {
   inicio: "#00B2BF", fin: "#E6332A", decision: "#F39200",
   dato: "#662483", nota: "#F0DFA8", proceso: "#9AA0AE",
+  documento: "#2A2F3A", subproceso: "#5B6275", basedatos: "#00B2BF",
 };
 
 const PALETTE: { type: keyof typeof NODE_TYPES; label: string; icon: string; title: string }[] = [
@@ -194,9 +285,14 @@ const PALETTE: { type: keyof typeof NODE_TYPES; label: string; icon: string; tit
   { type: "proceso", label: "Proceso", icon: "▭", title: "Paso o actividad (rectángulo)" },
   { type: "decision", label: "Decisión", icon: "◇", title: "Bifurcación sí/no (rombo)" },
   { type: "dato", label: "Dato", icon: "▱", title: "Entrada/salida de datos (paralelogramo)" },
+  { type: "documento", label: "Doc", icon: "🗎", title: "Entregable: informe, acta, propuesta" },
+  { type: "subproceso", label: "Subproceso", icon: "⧉", title: "Paso con flujo propio (doble barra)" },
+  { type: "basedatos", label: "BD", icon: "⛁", title: "Sistema, CRM o base de datos (cilindro)" },
   { type: "fin", label: "Fin", icon: "⏹", title: "Fin del flujo (píldora)" },
   { type: "nota", label: "Nota", icon: "🗒", title: "Comentario del diagrama" },
 ];
+
+const NODE_ICONS = ["⚙️", "📞", "💬", "📊", "📄", "👥", "✅", "⚠️", "🔍", "💰", "🕒", "🤖", "📥", "📤", "🎯", "🧠"];
 
 const DEFAULT_EDGE = {
   type: "smoothstep" as const,
@@ -240,12 +336,14 @@ const GEN_PHASES = [
 function FlowCanvas({
   projectId,
   flow,
+  members,
   expanded,
   onToggleExpand,
   onSaved,
 }: {
   projectId: string;
   flow: { id: string; name: string; data: any };
+  members: Member[];
   expanded: boolean;
   onToggleExpand: () => void;
   onSaved: () => void;
@@ -353,32 +451,112 @@ function FlowCanvas({
     scheduleSave();
   };
 
-  const exportPng = async () => {
-    if (!nodes.length) return;
-    rf.fitView({ padding: 0.2 });
-    await new Promise((r) => setTimeout(r, 250));
-    const dataUrl = await toPng(wrapperRef.current!.querySelector<HTMLElement>(".react-flow")!, {
+  /** PNG del diagrama COMPLETO: se calcula el bounding box de todos los nodos
+   *  y se renderiza a ese tamaño — nunca más cortado por el viewport. */
+  const buildPng = async (): Promise<string | null> => {
+    const all = rf.getNodes();
+    if (!all.length) return null;
+    const bounds = getNodesBounds(all);
+    const pad = 70;
+    const width = Math.min(2600, Math.max(640, Math.round(bounds.width + pad * 2)));
+    const height = Math.min(2600, Math.max(420, Math.round(bounds.height + pad * 2)));
+    const vp = getViewportForBounds(bounds, width, height, 0.2, 2, 0.06);
+    const el = wrapperRef.current?.querySelector<HTMLElement>(".react-flow__viewport");
+    if (!el) return null;
+    return toPng(el, {
       backgroundColor: "#ffffff",
-      filter: (node) =>
-        !node.classList?.contains("react-flow__minimap") &&
-        !node.classList?.contains("react-flow__controls") &&
-        !node.classList?.contains("react-flow__panel"),
+      width,
+      height,
+      pixelRatio: 1.5,
+      style: {
+        width: `${width}px`,
+        height: `${height}px`,
+        transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`,
+      },
     });
+  };
+
+  const exportPng = async () => {
+    const dataUrl = await buildPng();
+    if (!dataUrl) return;
     const a = document.createElement("a");
     a.href = dataUrl;
     a.download = `${flow.name}.png`;
     a.click();
   };
 
+  // ---- 📄 Insertar en el documento maestro (imagen + sección ordenada) ----
+  const [inserting, setInserting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const insertIntoDocument = async () => {
+    if (inserting) return;
+    setInserting(true);
+    setNotice("");
+    try {
+      const dataUrl = await buildPng();
+      if (!dataUrl) throw new Error("El flujo está vacío");
+      const blob = await (await fetch(dataUrl)).blob();
+      const form = new FormData();
+      form.append("file", new File([blob], `flow-${flow.id.slice(0, 8)}.png`, { type: "image/png" }));
+      const img = await apiFetch<{ url: string }>(`/api/v1/projects/${projectId}/images`, {
+        method: "POST",
+        body: form,
+      });
+      const res = await apiFetch<{ version_number: number; replaced: boolean }>(
+        `/api/v1/projects/${projectId}/flows/${flow.id}/insert-document`,
+        { method: "POST", body: JSON.stringify({ image_url: img.url }) }
+      );
+      setNotice(
+        `📄 ${res.replaced ? "Actualizado" : "Insertado"} en el documento (versión ${res.version_number}), antes de las Referencias.`
+      );
+    } catch (e: any) {
+      setNotice(`No se pudo insertar: ${e.message}`);
+    } finally {
+      setInserting(false);
+    }
+  };
+
+  // ---- Icono y asignación del nodo seleccionado ----
+  const [iconOpen, setIconOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const selectedNode = selected?.kind === "node" ? nodes.find((n) => n.id === selected.id) : null;
+
+  const setNodeData = (patch: Record<string, unknown>) => {
+    if (!selectedNode) return;
+    setNodes((ns) =>
+      ns.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, ...patch } } : n))
+    );
+    scheduleSave();
+  };
+
+  const assignMember = (m: Member | null) => {
+    if (!selectedNode) return;
+    setNodeData({ assignee: m ? { id: m.id, name: m.name } : undefined });
+    setAssignOpen(false);
+    if (m) {
+      apiFetch(`/api/v1/projects/${projectId}/flows/${flow.id}/assign`, {
+        method: "POST",
+        body: JSON.stringify({
+          node_id: selectedNode.id,
+          user_id: m.id,
+          user_name: m.name,
+          node_label: String(selectedNode.data?.label || ""),
+        }),
+      })
+        .then(() => setNotice(`🔔 ${m.name} fue notificado del paso asignado.`))
+        .catch(() => {});
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Barra de herramientas */}
-      <div className="flex items-center gap-1.5 flex-wrap px-3 py-2 border-b border-brand-border bg-brand-bg-soft/60">
+      <div className="relative flex items-center gap-1.5 flex-wrap px-3 py-2 border-b border-brand-border bg-brand-bg-soft/60">
         {PALETTE.map((p) => (
           <button
             key={p.type}
             title={p.title}
-            className="px-2.5 py-1.5 rounded-md border border-brand-border bg-white text-[11px] font-semibold text-brand-graphite hover:border-brand-cyan hover:text-brand-cyan transition-colors"
+            className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[11px] font-semibold text-brand-graphite hover:border-brand-cyan hover:text-brand-cyan transition-colors"
             onClick={() => addNode(p.type)}
           >
             {p.icon} {p.label}
@@ -386,30 +564,103 @@ function FlowCanvas({
         ))}
         <span className="w-px h-5 bg-brand-border mx-1" />
         <input
-          className="input !py-1.5 text-xs flex-1 min-w-[140px] max-w-[260px]"
-          placeholder={selected ? "Etiqueta de lo seleccionado…" : "Seleccioná un nodo o flecha para etiquetar"}
+          className="input !py-1.5 text-xs flex-1 min-w-[120px] max-w-[220px]"
+          placeholder={selected ? "Etiqueta…" : "Seleccioná para etiquetar"}
           value={selectedLabel}
           disabled={!selected}
           onChange={(e) => updateLabel(e.target.value)}
         />
+        {/* Icono y asignación: solo con un NODO seleccionado */}
+        <button
+          className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[13px] leading-none disabled:opacity-40 hover:border-brand-cyan transition-colors"
+          disabled={!selectedNode}
+          title="Icono del nodo seleccionado"
+          onClick={() => { setIconOpen((v) => !v); setAssignOpen(false); }}
+        >
+          {String(selectedNode?.data?.icon || "🙂")}
+        </button>
+        <button
+          className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[11px] font-semibold text-brand-graphite disabled:opacity-40 hover:border-brand-cyan hover:text-brand-cyan transition-colors"
+          disabled={!selectedNode}
+          title="Asignar este paso a un integrante (le llega la campana)"
+          onClick={() => { setAssignOpen((v) => !v); setIconOpen(false); }}
+        >
+          👤 Asignar
+        </button>
         <div className="ml-auto flex items-center gap-1.5">
           <span className="text-[10px] text-brand-mist tabular-nums mr-1">
             {saveState === "saving" ? "Guardando…" : saveState === "dirty" ? "Sin guardar" : "✓ Guardado"}
           </span>
-          <button className="btn-ghost !py-1.5 !px-2.5 text-xs" onClick={tidyUp}
+          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={tidyUp}
             title="Reordenar automáticamente el diagrama (capas sin cruces)">
             ⇅ Ordenar
           </button>
-          <button className="btn-ghost !py-1.5 !px-2.5 text-xs" onClick={exportPng}
-            title="Descargar el diagrama como imagen">
+          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={exportPng}
+            title="Descargar el diagrama COMPLETO como imagen (aunque no entre en pantalla)">
             ⬇ PNG
           </button>
-          <button className="btn-ghost !py-1.5 !px-2.5 text-xs" onClick={onToggleExpand}
+          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={insertIntoDocument}
+            disabled={inserting}
+            title="Insertar el flujograma en el documento maestro como sección propia, antes de las Referencias (si ya estaba, se actualiza sin duplicar)">
+            {inserting ? "Insertando…" : "📄 Al documento"}
+          </button>
+          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={onToggleExpand}
             title={expanded ? "Salir de pantalla completa (Esc)" : "Ampliar a pantalla completa"}>
             {expanded ? "✕ Cerrar" : "⛶ Ampliar"}
           </button>
         </div>
+
+        {/* Popover: iconos */}
+        {iconOpen && selectedNode && (
+          <div className="absolute top-full left-3 mt-1 glass rounded-xl p-2 z-30 animate-pop w-64">
+            <div className="grid grid-cols-8 gap-0.5">
+              {NODE_ICONS.map((ic) => (
+                <button key={ic}
+                  className="h-7 w-7 rounded hover:bg-brand-bg text-base leading-none"
+                  onClick={() => { setNodeData({ icon: ic }); setIconOpen(false); }}>
+                  {ic}
+                </button>
+              ))}
+            </div>
+            <button className="w-full mt-1 text-[11px] text-brand-slate hover:text-brand-primary py-1"
+              onClick={() => { setNodeData({ icon: undefined }); setIconOpen(false); }}>
+              ✕ Sin icono
+            </button>
+          </div>
+        )}
+
+        {/* Popover: asignar integrante */}
+        {assignOpen && selectedNode && (
+          <div className="absolute top-full left-3 mt-1 glass rounded-xl p-1 z-30 animate-pop w-64 max-h-56 overflow-y-auto">
+            <div className="px-2 pt-1.5 pb-1 text-[10px] uppercase tracking-wider2 text-brand-slate">
+              Responsable del paso (recibe la campana)
+            </div>
+            {members.map((m) => (
+              <button key={m.id}
+                className="w-full text-left px-2 py-1.5 rounded text-xs text-brand-graphite hover:bg-brand-bg flex items-center gap-2"
+                onClick={() => assignMember(m)}>
+                <span className="h-5 w-5 rounded-full bg-brand-purple text-white flex items-center justify-center text-[9px] font-bold shrink-0">
+                  {m.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
+                </span>
+                <span className="truncate">{m.name}</span>
+              </button>
+            ))}
+            {(selectedNode.data as any)?.assignee && (
+              <button className="w-full text-[11px] text-brand-slate hover:text-brand-primary py-1.5"
+                onClick={() => assignMember(null)}>
+                ✕ Quitar asignación
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {notice && (
+        <div className="px-3 py-1.5 border-b border-brand-border bg-emerald-50 text-[11px] text-emerald-800 flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate">{notice}</span>
+          <button className="shrink-0 hover:text-brand-primary" onClick={() => setNotice("")}>✕</button>
+        </div>
+      )}
 
       <div ref={wrapperRef} className="flex-1 min-h-0">
         <ReactFlow
@@ -460,6 +711,7 @@ export default function FlowsPage() {
   const [loading, setLoading] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [members, setMembers] = useState<Member[]>([]);
   // Diálogo propio para nombrar/renombrar (nada de prompts del navegador)
   const [nameDialog, setNameDialog] = useState<{ mode: "create" | "rename"; id?: string; value: string } | null>(null);
   // ✨ Generación con IA
@@ -490,7 +742,11 @@ export default function FlowsPage() {
         if (list.length) open(list[0].id).catch(() => {});
       })
       .catch(() => setLoading(false));
-  }, [load, open]);
+    // Integrantes asignables a los pasos (mismos mencionables del Cowork)
+    apiFetch<{ users: Member[] }>(`/api/v1/projects/${params.id}/cowork/mentionables`)
+      .then((r) => setMembers(r.users))
+      .catch(() => {});
+  }, [load, open, params.id]);
 
   // Esc sale del modo ampliado
   useEffect(() => {
@@ -795,6 +1051,7 @@ export default function FlowsPage() {
             <FlowCanvas
               projectId={params.id}
               flow={active}
+              members={members}
               expanded={expanded}
               onToggleExpand={() => setExpanded((v) => !v)}
               onSaved={load}
