@@ -28,6 +28,7 @@ const GROUPS = [
     tabs: [
       { href: "/chat", label: "Chat equipo" },
       { href: "/meet", label: "Vex Meet" },
+      { href: "/flows", label: "Flows" },
       { href: "/agent", label: "Agente Cowork" },
       { href: "/knowhub", label: "KnowHub" },
     ],

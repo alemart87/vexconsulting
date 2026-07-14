@@ -20,3 +20,4 @@ from .notification import Notification  # noqa: F401
 from .knowhub import KnowHubItem  # noqa: F401
 from .auto_mission import AutoMission  # noqa: F401
 from .meeting import Meeting  # noqa: F401
+from .flow import Flow  # noqa: F401
