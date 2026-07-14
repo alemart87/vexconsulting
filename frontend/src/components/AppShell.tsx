@@ -187,7 +187,8 @@ export default function AppShell({
   if (!user) return null;
 
   const isSuperadmin = user.role === "superadmin";
-  const isLider = user.role === "consultor_lider" || isSuperadmin;
+  const isLider =
+    user.role === "consultor_lider" || user.role === "consultor_lider_2" || isSuperadmin;
 
   return (
     <div className="min-h-screen flex flex-col">

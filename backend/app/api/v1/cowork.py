@@ -81,9 +81,10 @@ def _require_cowork_access(access: ProjectAccess) -> None:
 
 
 def _can_moderate(access: ProjectAccess) -> bool:
-    """Fijar/archivar/borrar hilos: consultor líder, superadmin o admin del proyecto."""
+    """Fijar/archivar/borrar hilos: líder (titular o suplente), superadmin o
+    admin del proyecto."""
     return (
-        access.user.role in ("superadmin", "consultor_lider")
+        access.user.role in ("superadmin", "consultor_lider", "consultor_lider_2")
         or access.permission == "admin"
     )
 

@@ -307,7 +307,10 @@ function MsgToolbar({
 export default function ChatPage() {
   const params = useParams<{ id: string }>();
   const me = getUser();
-  const canModerate = me?.role === "superadmin" || me?.role === "consultor_lider";
+  const canModerate =
+    me?.role === "superadmin" ||
+    me?.role === "consultor_lider" ||
+    me?.role === "consultor_lider_2";
   const [channels, setChannels] = useState<Channel[]>([]);
   const [active, setActive] = useState<Channel | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);

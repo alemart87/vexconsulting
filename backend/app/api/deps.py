@@ -1,7 +1,10 @@
 """Dependencias de autenticación y autorización.
 
 El superadmin vive SOLO en .env (usuario sintético, nunca en DB).
-Jerarquía: superadmin > consultor_lider > consultor > visualizador.
+Jerarquía: superadmin > consultor_lider > consultor_lider_2 (suplente)
+> consultor > visualizador. El suplente tiene las MISMAS atribuciones que
+el líder (crear usuarios, crear proyectos) pero depende jerárquicamente de
+él: no puede gestionar líderes ni a otros suplentes.
 El acceso a cada proyecto se resuelve con ProjectAccess (permiso efectivo).
 """
 from __future__ import annotations
@@ -41,11 +44,17 @@ class CurrentUser:
 
     @property
     def is_lider(self) -> bool:
+        """Atribuciones de líder: titular Y suplente (consultor_lider_2)."""
+        return self.role in ("consultor_lider", "consultor_lider_2")
+
+    @property
+    def is_lider_titular(self) -> bool:
+        """Solo el consultor líder titular (jerarquía sobre el suplente)."""
         return self.role == "consultor_lider"
 
     @property
     def is_consultor(self) -> bool:
-        return self.role in ("consultor_lider", "consultor")
+        return self.role in ("consultor_lider", "consultor_lider_2", "consultor")
 
     @property
     def is_visualizador(self) -> bool:

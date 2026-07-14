@@ -124,6 +124,7 @@ export default function CoworkAgentPage() {
   const canModerate =
     me?.role === "superadmin" ||
     me?.role === "consultor_lider" ||
+    me?.role === "consultor_lider_2" ||
     project?.my_permission === "admin";
   const [convs, setConvs] = useState<Conv[]>([]);
   const [showArchived, setShowArchived] = useState(false);

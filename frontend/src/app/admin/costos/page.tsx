@@ -29,7 +29,7 @@ export default function CostosIAPage() {
 
   useEffect(() => {
     const u = getUser();
-    if (u && !["superadmin", "consultor_lider"].includes(u.role)) {
+    if (u && !["superadmin", "consultor_lider", "consultor_lider_2"].includes(u.role)) {
       router.replace("/dashboard");
     }
   }, [router]);

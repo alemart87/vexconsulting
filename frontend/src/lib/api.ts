@@ -7,7 +7,7 @@ const USER_KEY = "vex_user";
 export interface CurrentUserInfo {
   id: string;
   email: string;
-  role: string; // superadmin | consultor_lider | consultor | visualizador
+  role: string; // superadmin | consultor_lider | consultor_lider_2 | consultor | visualizador
   full_name: string;
   photo_url?: string | null;
 }
@@ -44,6 +44,7 @@ export function saveUser(partial: Partial<CurrentUserInfo>): void {
 export const ROLE_LABELS: Record<string, string> = {
   superadmin: "Superadmin",
   consultor_lider: "Consultor líder",
+  consultor_lider_2: "Consultor líder 2 (suplente)",
   consultor: "Consultor",
   visualizador: "Visualizador",
 };
