@@ -409,6 +409,22 @@ function FlowCanvas({
     },
     [scheduleSave]
   );
+  // Referencia estable: React Flow re-suscribe el store si el handler cambia
+  // en cada render, y eso puede realimentar renders en cadena.
+  const onSelectionChange = useCallback(
+    ({ nodes: sn, edges: se }: { nodes: Node[]; edges: Edge[] }) => {
+      setSelected((prev) => {
+        const next = sn.length
+          ? ({ kind: "node", id: sn[0].id } as const)
+          : se.length
+            ? ({ kind: "edge", id: se[0].id } as const)
+            : null;
+        if (prev?.kind === next?.kind && prev?.id === next?.id) return prev;
+        return next;
+      });
+    },
+    []
+  );
 
   const addNode = (type: keyof typeof NODE_TYPES) => {
     const { x, y, zoom } = rf.getViewport();
@@ -691,11 +707,7 @@ function FlowCanvas({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onSelectionChange={({ nodes: sn, edges: se }) => {
-            if (sn.length) setSelected({ kind: "node", id: sn[0].id });
-            else if (se.length) setSelected({ kind: "edge", id: se[0].id });
-            else setSelected(null);
-          }}
+          onSelectionChange={onSelectionChange}
           defaultEdgeOptions={DEFAULT_EDGE}
           defaultViewport={flow.data?.viewport || undefined}
           fitView={!flow.data?.viewport}
