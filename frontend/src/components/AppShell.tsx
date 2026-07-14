@@ -166,13 +166,16 @@ export default function AppShell({
   }, [router]);
 
   // Se activa sola la primera vez: la general al entrar a la app, y la del
-  // proyecto la primera vez que se abre uno.
+  // proyecto SOLO en el Resumen (nunca emboscar con un modal en una página
+  // profunda como Flows o el Documento — el ? la abre a mano donde sea).
+  const inProjectRoot = !!pathname && /^\/projects\/(?!new)[^/]+$/.test(pathname);
   useEffect(() => {
     if (!user || user.role === "visualizador") return;
+    if (inProject && !inProjectRoot) return;
     if (localStorage.getItem(tourKey)) return;
     const timer = setTimeout(() => setTourOpen(true), 900);
     return () => clearTimeout(timer);
-  }, [user, tourKey]);
+  }, [user, tourKey, inProject, inProjectRoot]);
 
   const closeTour = () => {
     localStorage.setItem(tourKey, "1");

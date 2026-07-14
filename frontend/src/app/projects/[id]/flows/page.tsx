@@ -452,7 +452,12 @@ function FlowCanvas({
   };
 
   /** PNG del diagrama COMPLETO: se calcula el bounding box de todos los nodos
-   *  y se renderiza a ese tamaño — nunca más cortado por el viewport. */
+   *  y se renderiza a ese tamaño — nunca más cortado por el viewport.
+   *
+   *  skipFonts es CRÍTICO: sin él, html-to-image intenta descargar e incrustar
+   *  todas las hojas de estilo y fuentes remotas y puede colgarse para siempre
+   *  (era la causa del «no funciona nada» tras tocar PNG). Tope duro de 15 s. */
+  const [exporting, setExporting] = useState(false);
   const buildPng = async (): Promise<string | null> => {
     const all = rf.getNodes();
     if (!all.length) return null;
@@ -463,26 +468,41 @@ function FlowCanvas({
     const vp = getViewportForBounds(bounds, width, height, 0.2, 2, 0.06);
     const el = wrapperRef.current?.querySelector<HTMLElement>(".react-flow__viewport");
     if (!el) return null;
-    return toPng(el, {
+    const render = toPng(el, {
       backgroundColor: "#ffffff",
       width,
       height,
       pixelRatio: 1.5,
+      skipFonts: true,
       style: {
         width: `${width}px`,
         height: `${height}px`,
         transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`,
       },
     });
+    return Promise.race([
+      render,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("El render de la imagen tardó demasiado — reintentá")), 15000)
+      ),
+    ]);
   };
 
   const exportPng = async () => {
-    const dataUrl = await buildPng();
-    if (!dataUrl) return;
-    const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = `${flow.name}.png`;
-    a.click();
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const dataUrl = await buildPng();
+      if (!dataUrl) return;
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `${flow.name}.png`;
+      a.click();
+    } catch (e: any) {
+      setNotice(`No se pudo exportar el PNG: ${e.message}`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   // ---- 📄 Insertar en el documento maestro (imagen + sección ordenada) ----
@@ -596,8 +616,9 @@ function FlowCanvas({
             ⇅ Ordenar
           </button>
           <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={exportPng}
+            disabled={exporting}
             title="Descargar el diagrama COMPLETO como imagen (aunque no entre en pantalla)">
-            ⬇ PNG
+            {exporting ? "Exportando…" : "⬇ PNG"}
           </button>
           <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={insertIntoDocument}
             disabled={inserting}
