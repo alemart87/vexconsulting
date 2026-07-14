@@ -141,7 +141,14 @@ export default function GuidedTour({
   }
 
   return (
-    <div className="fixed inset-0 z-[90]" role="dialog" aria-modal="true">
+    // Click en el fondo oscuro = cerrar SIEMPRE: la guía nunca puede dejar la
+    // app «colgada» aunque la tarjeta quede fuera de vista.
+    <div
+      className="fixed inset-0 z-[90]"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       {/* Fondo oscuro; el recorte del foco lo hace el box-shadow del spotlight */}
       {rect ? (
         <div
@@ -155,7 +162,7 @@ export default function GuidedTour({
           }}
         />
       ) : (
-        <div className="absolute inset-0 bg-brand-ink/75" />
+        <div className="absolute inset-0 bg-brand-ink/75" onClick={onClose} />
       )}
 
       {/* Tarjeta del paso */}
