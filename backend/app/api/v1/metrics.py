@@ -154,6 +154,8 @@ _USO_LABELS = {
     "redaccion": "Ayuda de redacción (editor)",
     "evaluador": "Evaluador",
     "visualizador": "Asistente del visualizador",
+    "cowork": "Agente Cowork",
+    "flows": "Flows (flujogramas IA)",
 }
 
 

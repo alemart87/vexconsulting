@@ -373,6 +373,11 @@ export default function FlowsPage() {
   const [active, setActive] = useState<{ id: string; name: string; data: any } | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // ✨ Generar flow con IA desde una instrucción (costo trackeado en Costos IA)
+  const [genOpen, setGenOpen] = useState(false);
+  const [genText, setGenText] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [genNotice, setGenNotice] = useState("");
 
   const load = useCallback(async () => {
     const list = await apiFetch<FlowSummary[]>(`/api/v1/projects/${params.id}/flows`);
@@ -408,6 +413,30 @@ export default function FlowsPage() {
     setActive({ id: f.id, name: f.name, data: f.data });
   };
 
+  const generateFlow = async () => {
+    const instruction = genText.trim();
+    if (instruction.length < 10 || generating) return;
+    setGenerating(true);
+    setGenNotice("");
+    try {
+      const f = await apiFetch<any>(`/api/v1/projects/${params.id}/flows/generate`, {
+        method: "POST",
+        body: JSON.stringify({ instruction }),
+      });
+      setGenOpen(false);
+      setGenText("");
+      setGenNotice(
+        `✨ «${f.name}» generado (${f.nodes_count} nodos) · USD ${Number(f.cost_usd).toFixed(4)} registrado en Costos IA`
+      );
+      await load();
+      setActive({ id: f.id, name: f.name, data: f.data });
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const renameFlow = async (f: FlowSummary) => {
     const name = prompt("Nuevo nombre del flujo", f.name);
     if (!name || name.trim().length < 2) return;
@@ -436,21 +465,105 @@ export default function FlowsPage() {
     }
   };
 
+  const GEN_EXAMPLES = [
+    "Cómo implementar las mejoras propuestas en el documento",
+    "Cómo continuar la investigación a partir de los hallazgos",
+    "Cómo proponer estos resultados a los clientes",
+    "Proceso de escalamiento de reclamos con decisiones",
+  ];
+
   return (
     <div className="grid lg:grid-cols-[280px_1fr] gap-4 items-start">
+      {/* ---- Diálogo: generar flow con IA ---- */}
+      {genOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 animate-fade"
+          onClick={(e) => e.target === e.currentTarget && !generating && setGenOpen(false)}
+        >
+          <div className="card w-full max-w-lg p-5 animate-pop">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display uppercase text-brand-ink text-lg">
+                  ✨ Generar flow con IA
+                </h3>
+                <p className="text-xs text-brand-slate mt-0.5 leading-relaxed">
+                  Describí qué flujo necesitás y el agente lo diseña completo — nodos,
+                  decisiones y conexiones — usando el documento maestro como contexto.
+                  Después lo acomodás a gusto en el canvas.
+                </p>
+              </div>
+              <button
+                className="text-brand-slate hover:text-brand-primary text-lg leading-none"
+                onClick={() => !generating && setGenOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <textarea
+              className="input w-full mt-3 text-sm"
+              rows={3}
+              maxLength={2000}
+              placeholder="Ej.: Cómo implementar las mejoras del capítulo 5, con puntos de decisión y responsables…"
+              value={genText}
+              onChange={(e) => setGenText(e.target.value)}
+              disabled={generating}
+            />
+            <div className="flex gap-1.5 flex-wrap mt-2">
+              {GEN_EXAMPLES.map((s) => (
+                <button
+                  key={s}
+                  className="text-[11px] px-2.5 py-1 rounded-full border border-brand-border text-brand-slate hover:border-brand-cyan hover:text-brand-cyan transition-colors"
+                  onClick={() => setGenText(s)}
+                  disabled={generating}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <span className="text-[10px] text-brand-mist">
+                El consumo queda registrado en Costos IA (categoría «Flows»).
+              </span>
+              <button
+                className="btn-primary !py-2 text-xs shrink-0"
+                disabled={genText.trim().length < 10 || generating}
+                onClick={generateFlow}
+              >
+                {generating ? (
+                  <span className="shimmer-text">Diseñando el flujo…</span>
+                ) : (
+                  "✨ Generar"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Lista de flujos */}
       <div className="card overflow-hidden">
         <div className="p-3 border-b border-brand-border">
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-display uppercase text-brand-ink leading-none text-sm">⛓ Flows</h2>
-            <button className="btn-primary !py-1.5 !px-3 text-xs" onClick={createFlow}>
-              + Nuevo
-            </button>
+            <div className="flex gap-1.5">
+              <button
+                className="btn !py-1.5 !px-2.5 text-xs text-white bg-gradient-to-r from-brand-purple to-brand-cyan hover:opacity-90"
+                onClick={() => setGenOpen(true)}
+                title="El agente diseña el flujograma completo desde una instrucción, con el documento como contexto"
+              >
+                ✨ Con IA
+              </button>
+              <button className="btn-primary !py-1.5 !px-3 text-xs" onClick={createFlow}>
+                + Nuevo
+              </button>
+            </div>
           </div>
           <p className="text-[11px] text-brand-slate mt-1.5 leading-relaxed">
             Flujogramas del proyecto: procesos, decisiones y flujos de trabajo. Se
             guardan solos y se exportan a PNG.
           </p>
+          {genNotice && (
+            <p className="text-[11px] text-emerald-700 mt-1.5 leading-relaxed">{genNotice}</p>
+          )}
         </div>
         <div className="max-h-[62vh] overflow-y-auto scrollbar-thin">
           {loading && <p className="p-4 text-xs text-brand-slate">Cargando…</p>}
