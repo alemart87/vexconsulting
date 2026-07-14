@@ -17,6 +17,7 @@ interface UserRow {
 export default function AdminUsersPage() {
   const me = typeof window !== "undefined" ? getUser() : null;
   const isSuperadmin = me?.role === "superadmin";
+  const isLiderTitular = me?.role === "consultor_lider";
   const [users, setUsers] = useState<UserRow[]>([]);
   const [form, setForm] = useState({ email: "", full_name: "", password: "", role: "consultor" });
   const [error, setError] = useState("");
@@ -64,6 +65,9 @@ export default function AdminUsersPage() {
           <select className="input" value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value })}>
             {isSuperadmin && <option value="consultor_lider">Consultor líder</option>}
+            {(isSuperadmin || isLiderTitular) && (
+              <option value="consultor_lider_2">Consultor líder 2 (suplente)</option>
+            )}
             <option value="consultor">Consultor</option>
             <option value="visualizador">Visualizador (solo lectura de publicados)</option>
           </select>
@@ -72,8 +76,10 @@ export default function AdminUsersPage() {
           <button className="btn-primary w-full">Crear</button>
           <p className="text-[11px] text-brand-slate leading-relaxed">
             {isSuperadmin
-              ? "Como superadmin podés crear consultores líderes, consultores y visualizadores."
-              : "Como consultor líder podés crear consultores y visualizadores."}
+              ? "Como superadmin podés crear todos los roles."
+              : isLiderTitular
+                ? "Como consultor líder podés crear suplentes (Consultor líder 2), consultores y visualizadores. El suplente tiene tus mismas atribuciones pero depende de vos."
+                : "Como consultor líder suplente podés crear consultores y visualizadores."}
           </p>
         </form>
 

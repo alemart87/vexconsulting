@@ -9,7 +9,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
 
-ROLES = ("consultor_lider", "consultor", "visualizador")
+# Jerarquía: consultor_lider > consultor_lider_2 (suplente, para equipos
+# grandes: mismas atribuciones que el líder pero depende de él) > consultor
+# > visualizador.
+ROLES = ("consultor_lider", "consultor_lider_2", "consultor", "visualizador")
 
 
 def _uuid() -> str:

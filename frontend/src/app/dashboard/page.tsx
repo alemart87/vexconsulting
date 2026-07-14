@@ -21,7 +21,10 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const user = typeof window !== "undefined" ? getUser() : null;
-  const isLider = user?.role === "consultor_lider" || user?.role === "superadmin";
+  const isLider =
+    user?.role === "consultor_lider" ||
+    user?.role === "consultor_lider_2" ||
+    user?.role === "superadmin";
 
   useEffect(() => {
     apiFetch<Project[]>("/api/v1/projects")

@@ -57,9 +57,15 @@ async def upload_my_photo(
 
 
 def _can_manage_role(actor: CurrentUser, target_role: str) -> bool:
+    """Jerarquía: el superadmin gestiona todo; el líder TITULAR gestiona
+    suplentes, consultores y visualizadores; el SUPLENTE (consultor_lider_2)
+    tiene las mismas atribuciones hacia abajo pero no gestiona líderes ni a
+    otros suplentes — depende del titular."""
     if actor.is_superadmin:
         return True
-    if actor.is_lider:
+    if actor.is_lider_titular:
+        return target_role in ("consultor_lider_2", "consultor", "visualizador")
+    if actor.is_lider:  # suplente
         return target_role in ("consultor", "visualizador")
     return False
 
@@ -72,7 +78,12 @@ async def list_users(
     result = await db.execute(select(User).order_by(User.created_at.desc()))
     users = result.scalars().all()
     if not actor.is_superadmin:
-        users = [u for u in users if u.role in ("consultor", "visualizador") or u.id == actor.id]
+        visible = (
+            ("consultor_lider_2", "consultor", "visualizador")
+            if actor.is_lider_titular
+            else ("consultor", "visualizador")
+        )
+        users = [u for u in users if u.role in visible or u.id == actor.id]
     return [UserOut.model_validate(u) for u in users]
 
 
@@ -86,7 +97,8 @@ async def create_user(
     if not _can_manage_role(actor, payload.role):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Un consultor líder solo puede crear consultores y visualizadores",
+            "No podés crear usuarios con ese rol: el líder titular crea suplentes, "
+            "consultores y visualizadores; el suplente crea consultores y visualizadores",
         )
     email = payload.email.lower().strip()
     existing = await db.execute(select(User).where(User.email == email))
