@@ -60,6 +60,8 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("export_jobs", "options", "JSON"),
     ("messages", "author_id", "VARCHAR(64)"),
     ("messages", "author_name", "VARCHAR(255)"),
+    ("conversations", "pinned_at", "TIMESTAMPTZ"),
+    ("conversations", "archived_at", "TIMESTAMPTZ"),
 ]
 
 # Sentencias idempotentes que corren en cada arranque (solo Postgres).

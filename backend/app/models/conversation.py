@@ -25,6 +25,9 @@ class Conversation(Base):
     agent_type: Mapped[str] = mapped_column(String(20), default="acompanante")
     role_slug: Mapped[str | None] = mapped_column(String(50), nullable=True)
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Moderación de hilos del Agente Cowork (líder/admin): fijado y archivado
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
