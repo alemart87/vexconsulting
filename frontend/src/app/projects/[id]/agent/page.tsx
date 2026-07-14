@@ -13,6 +13,7 @@ import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { apiFetch, getUser, parseApiDate } from "@/lib/api";
+import { useProject } from "@/components/ProjectContext";
 
 interface Conv {
   id: string;
@@ -20,6 +21,8 @@ interface Conv {
   participants: string[];
   last_message?: string | null;
   last_role?: string | null;
+  pinned_at?: string | null;
+  archived_at?: string | null;
   updated_at: string;
 }
 interface Msg {
@@ -41,24 +44,30 @@ interface Member {
 const hhmm = (iso: string) =>
   parseApiDate(iso).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" });
 
-/** Avatar del Agente Cowork: monograma V con degradado de marca y anillo
- *  animado — corporativo y vivo (el anillo late más rápido cuando piensa). */
+/** Avatar del Agente Cowork: V roja Voicenter sobre fondo blanco, con pulsos
+ *  concéntricos en los colores de la marca (rojo, cyan, naranja) — bien
+ *  marcados pero profesionales. Los pulsos se aceleran mientras piensa. */
 function AgentAvatar({ size = "sm", active = false }: { size?: "sm" | "lg"; active?: boolean }) {
-  const box = size === "lg" ? "h-16 w-16 text-2xl" : "h-8 w-8 text-[13px]";
+  const box = size === "lg" ? "h-16 w-16 text-2xl" : "h-8 w-8 text-[14px]";
+  const dur = active ? "1.1s" : "2.8s";
+  const ring = (color: string, opacity: number, delay: string) => (
+    <span
+      className="absolute inset-0 rounded-full animate-ping"
+      style={{
+        border: `2px solid ${color}`,
+        opacity,
+        animationDuration: dur,
+        animationDelay: delay,
+      }}
+    />
+  );
   return (
     <div className={`${box} shrink-0 relative rounded-full flex items-center justify-center`}>
-      <span
-        className={`absolute inset-0 rounded-full opacity-40 ${active ? "animate-ping" : "animate-pulse"}`}
-        style={{
-          background: "conic-gradient(from 180deg, #00B2BF, #662483, #E6332A, #00B2BF)",
-          animationDuration: active ? "1.2s" : "3s",
-        }}
-      />
-      <span
-        className="absolute inset-0 rounded-full shadow-soft"
-        style={{ background: "linear-gradient(135deg, #00B2BF 0%, #662483 60%, #0F1116 100%)" }}
-      />
-      <span className="relative font-black text-white select-none" style={{ fontFamily: "inherit" }}>
+      {ring("#E6332A", 0.55, "0s")}
+      {ring("#00B2BF", 0.4, "0.7s")}
+      {ring("#F39200", 0.3, "1.4s")}
+      <span className="absolute inset-[2px] rounded-full bg-white border border-brand-border shadow-soft" />
+      <span className="relative font-black select-none" style={{ color: "#E6332A" }}>
         V
       </span>
     </div>
@@ -82,7 +91,16 @@ function Avatar({ name, url, agent }: { name?: string | null; url?: string | nul
 export default function CoworkAgentPage() {
   const params = useParams<{ id: string }>();
   const me = getUser();
+  const { project } = useProject();
+  // Moderación de hilos: consultor líder, superadmin o admin del proyecto
+  const canModerate =
+    me?.role === "superadmin" ||
+    me?.role === "consultor_lider" ||
+    project?.my_permission === "admin";
   const [convs, setConvs] = useState<Conv[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedCount, setArchivedCount] = useState(0);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -94,12 +112,55 @@ export default function CoworkAgentPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<string | null>(null);
   activeRef.current = active;
+  const showArchivedRef = useRef(false);
+  showArchivedRef.current = showArchived;
 
-  const loadConvs = useCallback(async () => {
-    const list = await apiFetch<Conv[]>(`/api/v1/projects/${params.id}/cowork/conversations`);
-    setConvs(list);
-    return list;
-  }, [params.id]);
+  const loadConvs = useCallback(
+    async (archived = false) => {
+      const list = await apiFetch<Conv[]>(
+        `/api/v1/projects/${params.id}/cowork/conversations${archived ? "?archived=1" : ""}`
+      );
+      setConvs(list);
+      apiFetch<{ count: number }>(
+        `/api/v1/projects/${params.id}/cowork/conversations/archived-count`
+      )
+        .then((r) => setArchivedCount(r.count))
+        .catch(() => {});
+      return list;
+    },
+    [params.id]
+  );
+
+  const moderate = async (c: Conv, action: "pin" | "archive" | "delete") => {
+    try {
+      if (action === "delete") {
+        if (confirmDeleteId !== c.id) {
+          setConfirmDeleteId(c.id);
+          setTimeout(() => setConfirmDeleteId(null), 4000);
+          return;
+        }
+        setConfirmDeleteId(null);
+        await apiFetch(`/api/v1/projects/${params.id}/cowork/conversations/${c.id}`, {
+          method: "DELETE",
+        });
+        if (active === c.id) {
+          setActive(null);
+          setMessages([]);
+        }
+      } else {
+        await apiFetch(`/api/v1/projects/${params.id}/cowork/conversations/${c.id}/${action}`, {
+          method: "POST",
+        });
+        if (action === "archive" && active === c.id && !showArchived) {
+          setActive(null);
+          setMessages([]);
+        }
+      }
+      await loadConvs(showArchived);
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
 
   const loadMessages = useCallback(
     async (cid: string) => {
@@ -132,9 +193,14 @@ export default function CoworkAgentPage() {
     apiFetch<{ users: Member[] }>(`/api/v1/projects/${params.id}/cowork/mentionables`)
       .then((r) => setMembers(r.users))
       .catch(() => {});
-    const iv = setInterval(() => loadConvs().catch(() => {}), 15000);
+    const iv = setInterval(() => loadConvs(showArchivedRef.current).catch(() => {}), 15000);
     return () => clearInterval(iv);
   }, [params.id, loadConvs]);
+
+  // Cambiar entre activas ↔ archivadas
+  useEffect(() => {
+    loadConvs(showArchived).catch(() => {});
+  }, [showArchived, loadConvs]);
 
   // Mensajes de la conversación activa + polling (el hilo es compartido:
   // otro compañero puede estar escribiendo con el agente ahora mismo)
@@ -223,8 +289,15 @@ export default function CoworkAgentPage() {
           }),
         }
       );
+      // Dedupe por id: el polling pudo traer ya el mensaje del usuario desde
+      // el server (reemplazando al optimista) — sin esto se veía duplicado.
       setMessages((prev) => [
-        ...prev.filter((m) => m.id !== tempId),
+        ...prev.filter(
+          (m) =>
+            m.id !== tempId &&
+            m.id !== res.user_message.id &&
+            m.id !== res.assistant_message.id
+        ),
         res.user_message,
         res.assistant_message,
       ]);
@@ -268,28 +341,83 @@ export default function CoworkAgentPage() {
             </p>
           )}
           {convs.map((c) => (
-            <button
+            <div
               key={c.id}
+              role="button"
+              tabIndex={0}
               onClick={() => setActive(c.id)}
-              className={`w-full text-left px-3.5 py-2.5 border-b border-brand-border/60 transition-colors ${
+              onKeyDown={(e) => e.key === "Enter" && setActive(c.id)}
+              className={`group w-full text-left px-3.5 py-2.5 border-b border-brand-border/60 transition-colors cursor-pointer ${
                 active === c.id ? "bg-brand-primary-light/50" : "hover:bg-brand-bg-soft"
               }`}
             >
-              <div className="text-[13px] font-bold text-brand-ink truncate">{c.title}</div>
-              {c.last_message && (
-                <div className="text-[11px] text-brand-slate truncate mt-0.5">
-                  {c.last_role === "assistant" ? "✦ " : ""}
-                  {c.last_message}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold text-brand-ink truncate">
+                    {c.pinned_at ? "📌 " : ""}
+                    {c.title}
+                  </div>
+                  {c.last_message && (
+                    <div className="text-[11px] text-brand-slate truncate mt-0.5">
+                      {c.last_role === "assistant" ? "✦ " : ""}
+                      {c.last_message}
+                    </div>
+                  )}
+                  {c.participants.length > 0 && (
+                    <div className="text-[10px] text-brand-mist truncate mt-0.5">
+                      {c.participants.join(" · ")}
+                    </div>
+                  )}
                 </div>
-              )}
-              {c.participants.length > 0 && (
-                <div className="text-[10px] text-brand-mist truncate mt-0.5">
-                  {c.participants.join(" · ")}
-                </div>
-              )}
-            </button>
+                {canModerate && (
+                  <div
+                    className="flex gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <span
+                      role="button"
+                      title={c.pinned_at ? "Desfijar" : "Fijar arriba"}
+                      className={`h-6 w-6 rounded flex items-center justify-center text-[12px] hover:bg-white ${
+                        c.pinned_at ? "text-brand-primary" : "text-brand-slate"
+                      }`}
+                      onClick={() => moderate(c, "pin")}
+                    >
+                      📌
+                    </span>
+                    <span
+                      role="button"
+                      title={c.archived_at ? "Restaurar" : "Archivar"}
+                      className="h-6 w-6 rounded flex items-center justify-center text-[12px] text-brand-slate hover:bg-white"
+                      onClick={() => moderate(c, "archive")}
+                    >
+                      {c.archived_at ? "↩" : "🗄"}
+                    </span>
+                    <span
+                      role="button"
+                      title={confirmDeleteId === c.id ? "Confirmá para borrar" : "Borrar hilo"}
+                      className={`h-6 rounded flex items-center justify-center text-[11px] px-1 ${
+                        confirmDeleteId === c.id
+                          ? "bg-brand-primary text-white font-bold"
+                          : "w-6 text-brand-slate hover:bg-white"
+                      }`}
+                      onClick={() => moderate(c, "delete")}
+                    >
+                      {confirmDeleteId === c.id ? "¿Borrar?" : "🗑"}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
           ))}
         </div>
+        {(archivedCount > 0 || showArchived) && (
+          <button
+            className="w-full px-3.5 py-2 text-[11px] font-semibold text-brand-slate hover:text-brand-ink border-t border-brand-border text-left"
+            onClick={() => setShowArchived((v) => !v)}
+          >
+            {showArchived ? "← Volver a las activas" : `🗄 Ver archivadas (${archivedCount})`}
+          </button>
+        )}
       </div>
 
       {/* ---- Hilo con el agente ---- */}
