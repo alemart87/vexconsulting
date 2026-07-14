@@ -83,13 +83,15 @@ def _out(m: Meeting) -> dict:
 
 
 def _summary(m: Meeting) -> dict:
+    from ...services.document_service import count_words
+
     text = (m.content_md or "").strip().replace("#", "").replace("*", "")
     return {
         "id": m.id, "title": m.title, "meeting_date": m.meeting_date,
         "location": m.location,
         "attendees": m.attendees or [],
         "excerpt": text[:180],
-        "words": len((m.content_md or "").split()),
+        "words": count_words(m.content_md or ""),
         "created_by": m.created_by, "created_by_name": m.created_by_name,
         "updated_at": m.updated_at,
     }

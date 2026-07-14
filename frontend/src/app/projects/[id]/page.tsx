@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiFetch, downloadFile, formatDate } from "@/lib/api";
+import { estimatePages } from "@/lib/docstats";
 import { useProject } from "@/components/ProjectContext";
 
 /** Citas del documento: entradas de la sección Referencias si existe;
@@ -22,11 +23,6 @@ function countCitations(md: string): number {
     .map((l) => l.match(/\((https?:[^\s)]+)\)/)?.[1])
     .filter(Boolean);
   return new Set(urls).size;
-}
-
-/** Páginas A4 estimadas con la maqueta del export (~450 palabras por página). */
-function estimatePages(words: number): number {
-  return words > 0 ? Math.max(1, Math.ceil(words / 450)) : 0;
 }
 
 export default function ProjectOverview() {

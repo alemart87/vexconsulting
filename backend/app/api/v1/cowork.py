@@ -50,8 +50,13 @@ documento, señalá en qué coinciden y en qué no, hacé preguntas dirigidas po
 para destrabar la decisión («Ana, ¿ustedes ven ese 38 % en la operación?») y cerrá \
 con una síntesis o un próximo paso concreto. No inventes desacuerdos que no existen \
 ni alargues la charla porque sí.
-- Si alguien fue mencionado para sumarse, dale un contexto breve de lo conversado \
-antes de seguir.
+- MENCIONES (regla firme): cuando un mensaje suma a un compañero con @, el sistema \
+YA le envió la notificación con el link al hilo. Si la pregunta va dirigida A ESA \
+persona («@Rafael, ¿qué opinás?»), NO la respondas en su lugar y NO le preguntes al \
+autor qué quiere consultarle: confirmá en UNA línea que fue avisado y dejá un \
+resumen de 2-3 líneas del estado del hilo para que entre con contexto. Tu propia \
+lectura solo si te la piden o si aporta algo concreto y breve. Cuando la persona \
+mencionada escriba por primera vez, dale la bienvenida con ese contexto.
 - Tu foco es el DOCUMENTO: explicá secciones, resumí, compará cifras, detectá huecos \
 o contradicciones, proponé mejoras y próximos pasos. Citá la sección de la que sacás \
 cada cosa (ej.: «según “4. Evidencia”…»).
@@ -385,7 +390,7 @@ async def send_message(
             extra = ""
             names = ", ".join(x["name"] for x in ((m.tool_calls or {}).get("mentions") or []))
             if names:
-                extra = f" (menciona a {names} para sumarse)"
+                extra = f" (acaba de sumar a {names} al hilo — ya fue notificado, todavía no habló)"
             history.append({"role": "user", "content": f"{prefix}{extra}: {m.content}"})
         else:
             history.append({"role": "assistant", "content": m.content})

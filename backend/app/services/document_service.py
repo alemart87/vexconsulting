@@ -18,8 +18,30 @@ LOCK_TTL_SECONDS = 90
 _WORD_RE = re.compile(r"\S+")
 
 
+def strip_markdown(md: str) -> str:
+    """Texto LEGIBLE del markdown: lo que un lector realmente lee.
+
+    Sin esto, `## Título`, las barras de las tablas y las URLs de los enlaces
+    contaban como «palabras» y el Resumen mostraba un número distinto al del
+    editor (que cuenta sobre el texto renderizado)."""
+    text = md or ""
+    text = re.sub(r"```[^\n]*", " ", text)                     # marcas de código (el código queda)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)          # imágenes: no son texto
+    text = re.sub(r"\[([^\]]*)\]\(([^)]*)\)", r"\1", text)     # enlaces → solo el texto visible
+    text = re.sub(r"<[^>\n]+>", " ", text)                     # tags html sueltos
+    text = re.sub(r"^\s*\|?[\s:|-]+\|[\s:|-]*$", " ", text, flags=re.M)  # separadores de tabla
+    text = text.replace("|", " ")                              # barras de celdas
+    text = re.sub(r"^\s{0,3}#{1,6}\s+", "", text, flags=re.M)  # marcas de título
+    text = re.sub(r"^\s*(?:[-*+]|\d+\.)\s+", "", text, flags=re.M)  # viñetas y numeración
+    text = re.sub(r"^\s*>\s?", "", text, flags=re.M)           # citas en bloque
+    text = re.sub(r"^\s*([-*_]\s?){3,}$", " ", text, flags=re.M)  # separadores ---
+    text = re.sub(r"[*_~`]+", "", text)                        # énfasis
+    return text
+
+
 def count_words(text: str) -> int:
-    return len(_WORD_RE.findall(text or ""))
+    """Palabras LEGIBLES (misma vara que el contador en vivo del editor)."""
+    return len(_WORD_RE.findall(strip_markdown(text)))
 
 
 def make_diff(old: str, new: str) -> str:

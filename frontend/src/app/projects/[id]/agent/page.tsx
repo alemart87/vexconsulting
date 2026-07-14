@@ -44,33 +44,61 @@ interface Member {
 const hhmm = (iso: string) =>
   parseApiDate(iso).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" });
 
-/** Avatar del Agente Cowork: V roja Voicenter sobre fondo blanco, con pulsos
- *  concéntricos en los colores de la marca (rojo, cyan, naranja) — bien
- *  marcados pero profesionales. Los pulsos se aceleran mientras piensa. */
+/** Avatar del Agente Cowork: V roja Voicenter sobre blanco con un anillo de
+ *  marca NÍTIDO — fino y quieto en reposo, girando con los colores Voicenter
+ *  mientras piensa (patrón limpio, sin pings borrosos). */
 function AgentAvatar({ size = "sm", active = false }: { size?: "sm" | "lg"; active?: boolean }) {
   const box = size === "lg" ? "h-16 w-16 text-2xl" : "h-8 w-8 text-[14px]";
-  const dur = active ? "1.1s" : "2.8s";
-  const ring = (color: string, opacity: number, delay: string) => (
-    <span
-      className="absolute inset-0 rounded-full animate-ping"
-      style={{
-        border: `2px solid ${color}`,
-        opacity,
-        animationDuration: dur,
-        animationDelay: delay,
-      }}
-    />
-  );
   return (
-    <div className={`${box} shrink-0 relative rounded-full flex items-center justify-center`}>
-      {ring("#E6332A", 0.55, "0s")}
-      {ring("#00B2BF", 0.4, "0.7s")}
-      {ring("#F39200", 0.3, "1.4s")}
-      <span className="absolute inset-[2px] rounded-full bg-white border border-brand-border shadow-soft" />
-      <span className="relative font-black select-none" style={{ color: "#E6332A" }}>
-        V
+    <div className={`${box} shrink-0 relative rounded-full`}>
+      <span
+        className={`absolute inset-0 rounded-full ${active ? "animate-spin" : ""}`}
+        style={{
+          background: active
+            ? "conic-gradient(#E6332A 0 30%, #00B2BF 30% 55%, #F39200 55% 78%, #E6332A 78% 100%)"
+            : "#E6332A",
+          animationDuration: "1.4s",
+        }}
+      />
+      <span className="absolute inset-[2.5px] rounded-full bg-white shadow-soft flex items-center justify-center">
+        <span className="font-black select-none" style={{ color: "#E6332A" }}>
+          V
+        </span>
       </span>
     </div>
+  );
+}
+
+/** Menciones @Nombre resaltadas como token (estilo Slack/Teams). */
+function MentionText({
+  content,
+  names,
+  mine,
+}: {
+  content: string;
+  names: string[];
+  mine: boolean;
+}) {
+  if (!names.length) return <span className="whitespace-pre-wrap">{content}</span>;
+  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const parts = content.split(new RegExp(`@(${escaped.join("|")})`, "g"));
+  return (
+    <span className="whitespace-pre-wrap">
+      {parts.map((p, i) =>
+        i % 2 === 1 ? (
+          <span
+            key={i}
+            className={`rounded px-1 py-px font-semibold ${
+              mine ? "bg-white/25 text-white" : "bg-brand-cyan/20 text-brand-ink"
+            }`}
+          >
+            @{p}
+          </span>
+        ) : (
+          p
+        )
+      )}
+    </span>
   );
 }
 
@@ -467,41 +495,44 @@ export default function CoworkAgentPage() {
           {messages.map((m) => {
             const mine = m.role === "user" && m.author_id === me?.id;
             const isAgent = m.role === "assistant";
+            const mentionNames = (m.mentions || []).map((u) => u.name).filter(Boolean);
             return (
-              <div key={m.id} className={`flex gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
-                <Avatar agent={isAgent} name={m.author_name} url={m.author_photo_url} />
-                <div className={`max-w-[82%] min-w-0 ${mine ? "text-right" : ""}`}>
-                  <div className={`text-[10px] font-semibold mb-0.5 ${mine ? "text-brand-mist" : "text-brand-slate"}`}>
-                    {isAgent ? "Agente Cowork" : m.author_name || "Consultor"} · {hhmm(m.created_at)}
-                  </div>
-                  <div
-                    className={`inline-block text-left rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed ${
-                      isAgent
-                        ? "bg-brand-bg-soft border border-brand-border text-brand-graphite rounded-tl-sm"
-                        : mine
-                          ? "bg-brand-ink text-white rounded-tr-sm"
-                          : "bg-brand-cyan/10 border border-brand-cyan/30 text-brand-graphite rounded-tl-sm"
-                    }`}
-                  >
-                    {isAgent ? (
-                      <div className="prose-vex !text-[13.5px] [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <span className="whitespace-pre-wrap">{m.content}</span>
-                    )}
-                  </div>
-                  {(m.mentions?.length ?? 0) > 0 && (
-                    <div className={`mt-1 flex gap-1 flex-wrap ${mine ? "justify-end" : ""}`}>
-                      {m.mentions!.map((u) => (
-                        <span key={u.id}
-                          className="text-[10px] px-1.5 py-0.5 rounded-full bg-brand-purple/10 text-brand-purple font-semibold">
-                          🔔 sumó a {u.name}
-                        </span>
-                      ))}
+              <div key={m.id}>
+                <div className={`flex gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
+                  <Avatar agent={isAgent} name={m.author_name} url={m.author_photo_url} />
+                  <div className={`max-w-[82%] min-w-0 ${mine ? "text-right" : ""}`}>
+                    <div className={`text-[10px] font-semibold mb-0.5 ${mine ? "text-brand-mist" : "text-brand-slate"}`}>
+                      {isAgent ? "Agente Cowork" : m.author_name || "Consultor"} · {hhmm(m.created_at)}
                     </div>
-                  )}
+                    <div
+                      className={`inline-block text-left rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed ${
+                        isAgent
+                          ? "bg-brand-bg-soft border border-brand-border text-brand-graphite rounded-tl-sm"
+                          : mine
+                            ? "bg-brand-ink text-white rounded-tr-sm"
+                            : "bg-brand-cyan/10 border border-brand-cyan/30 text-brand-graphite rounded-tl-sm"
+                      }`}
+                    >
+                      {isAgent ? (
+                        <div className="prose-vex !text-[13.5px] [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <MentionText content={m.content} names={mentionNames} mine={mine} />
+                      )}
+                    </div>
+                  </div>
                 </div>
+                {/* Evento de sistema (estilo Slack): la notificación fue REAL */}
+                {mentionNames.length > 0 && (
+                  <div className="flex justify-center my-2">
+                    <span className="text-[10.5px] text-brand-slate bg-brand-bg-soft border border-brand-border rounded-full px-3 py-1 text-center">
+                      🔔 {mine ? "Sumaste" : `${m.author_name || "Alguien"} sumó`} a{" "}
+                      <b>{mentionNames.join(" y ")}</b> — le llegó la notificación con el
+                      link a este hilo
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -541,8 +572,9 @@ export default function CoworkAgentPage() {
             <div className="flex gap-1.5 flex-wrap mb-2">
               {pendingMentions.map((u) => (
                 <span key={u.id}
+                  title="Al enviar, le llega la campana con el link a este hilo"
                   className="inline-flex items-center gap-1 rounded-full bg-brand-purple/10 text-brand-purple text-[11px] font-semibold px-2.5 py-1">
-                  🔔 {u.name}
+                  🔔 Avisar a {u.name}
                   <button className="hover:text-brand-primary"
                     onClick={() => setPendingMentions((prev) => prev.filter((x) => x.id !== u.id))}>
                     ✕

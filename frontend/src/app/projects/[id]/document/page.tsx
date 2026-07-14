@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import AgentChat, { Proposal } from "@/components/agent/AgentChat";
 import GuidedTour, { TourStep } from "@/components/GuidedTour";
 import MarkdownEditor, { EditorHandle } from "@/components/editor/MarkdownEditor";
+import { estimatePages, readingMinutes } from "@/lib/docstats";
 import { apiFetch, formatDate, getUser, parseApiDate } from "@/lib/api";
 import { useProject } from "@/components/ProjectContext";
 
@@ -1441,10 +1442,10 @@ export default function DocumentPage() {
           )}
           <span>
             {(liveStats?.words ?? doc.word_count).toLocaleString("es-PY")} palabras ·{" "}
-            <span title="Estimación en formato Word/PDF (~300 palabras por página)">
-              ~{Math.max(1, Math.ceil((liveStats?.words ?? doc.word_count) / 300))} págs.
+            <span title="Estimación en formato A4 del export (~450 palabras por página) — la misma cuenta que el Resumen">
+              ~{estimatePages(liveStats?.words ?? doc.word_count)} págs.
             </span>{" "}
-            · {Math.max(1, Math.round((liveStats?.words ?? doc.word_count) / 200))} min de
+            · {readingMinutes(liveStats?.words ?? doc.word_count)} min de
             lectura ·{" "}
             <Link
               href={`/projects/${params.id}/document/versions`}
