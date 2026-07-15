@@ -107,8 +107,12 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   }, [params.id]);
 
   const base = `/projects/${params.id}`;
-  // En la página completa del agente el dock sobra (sería el chat duplicado)
-  const onAgentPage = !!pathname && pathname.startsWith(`${base}/agent`);
+  // El dock del agente sobra en /agent (sería el chat duplicado) y en el
+  // Documento (ahí ya viven el Investigador y el Chat del proyecto — dos
+  // paneles IA a la vez molestan visualmente).
+  const onAgentPage =
+    !!pathname &&
+    (pathname.startsWith(`${base}/agent`) || pathname.startsWith(`${base}/document`));
   const isAdmin = project?.my_permission === "admin";
   const visibleGroups = GROUPS.map((g) => ({
     ...g,
