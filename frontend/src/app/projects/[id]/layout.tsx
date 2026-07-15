@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { ProjectContext, ProjectInfo } from "@/components/ProjectContext";
 import { apiFetch } from "@/lib/api";
+
+// El chat del agente (con react-markdown) solo se descarga al abrir el dock
+const CoworkAgent = dynamic(() => import("@/components/CoworkAgent"), { ssr: false });
 
 // La navegación se organiza en zonas con lógica de flujo de trabajo:
 // producir el informe → colaborar alrededor de él → controlar calidad y equipo.
@@ -48,6 +52,7 @@ const GROUPS = [
 ];
 
 const RAIL_KEY = "vex_nav_rail_v1";
+const DOCK_KEY = "vex_agent_dock_v1";
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>();
@@ -57,6 +62,8 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   const [error, setError] = useState("");
   // Contraído = solo iconos (más lienzo para Documento/Flows). Persiste.
   const [collapsed, setCollapsed] = useState(false);
+  // Dock del Agente Cowork: panel lateral derecho plegable (patrón copilot).
+  const [dockOpen, setDockOpen] = useState(false);
   // Proyectos que se vincularon a ESTE (ej.: materiales de un plan de curso)
   const [linkedChildren, setLinkedChildren] = useState<{ id: string; name: string }[]>([]);
 
@@ -70,11 +77,19 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     setCollapsed(localStorage.getItem(RAIL_KEY) === "1");
+    setDockOpen(localStorage.getItem(DOCK_KEY) === "1");
   }, []);
 
   const toggleRail = () => {
     setCollapsed((v) => {
       localStorage.setItem(RAIL_KEY, v ? "0" : "1");
+      return !v;
+    });
+  };
+
+  const toggleDock = () => {
+    setDockOpen((v) => {
+      localStorage.setItem(DOCK_KEY, v ? "0" : "1");
       return !v;
     });
   };
@@ -92,6 +107,8 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   }, [params.id]);
 
   const base = `/projects/${params.id}`;
+  // En la página completa del agente el dock sobra (sería el chat duplicado)
+  const onAgentPage = !!pathname && pathname.startsWith(`${base}/agent`);
   const isAdmin = project?.my_permission === "admin";
   const visibleGroups = GROUPS.map((g) => ({
     ...g,
@@ -271,7 +288,42 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             </aside>
 
             <div className="flex-1 min-w-0">{children}</div>
+
+            {/* ===== Dock del Agente Cowork (lg+): panel derecho plegable.
+                 Patrón copilot: el agente al lado del trabajo — se conversa
+                 sobre el documento mientras se mira el Gantt o un flow. ===== */}
+            {!onAgentPage && dockOpen && (
+              <aside className="hidden lg:flex flex-col shrink-0 sticky top-20 self-start h-[calc(100vh-5.5rem)] w-[400px] xl:w-[440px]">
+                <div className="card shadow-elevated flex flex-col h-full min-h-0 overflow-hidden">
+                  <CoworkAgent dock onClose={toggleDock} />
+                </div>
+              </aside>
+            )}
           </div>
+
+          {/* Pestaña flotante para abrir el dock (solo desktop, plegado) */}
+          {!onAgentPage && !dockOpen && (
+            <button
+              onClick={toggleDock}
+              title="Abrir el Agente Cowork — conversá sobre el documento sin salir de esta sección"
+              className="hidden lg:flex fixed right-0 top-1/2 -translate-y-1/2 z-30 flex-col items-center gap-2 rounded-l-2xl bg-white border border-r-0 border-brand-border shadow-elevated px-2 py-3.5 hover:pr-3.5 transition-all group"
+            >
+              <span className="relative h-8 w-8 rounded-full" aria-hidden>
+                <span className="absolute inset-0 rounded-full" style={{ background: "#E6332A" }} />
+                <span className="absolute inset-[2.5px] rounded-full bg-white shadow-soft flex items-center justify-center">
+                  <span className="font-black text-[14px] select-none" style={{ color: "#E6332A" }}>
+                    V
+                  </span>
+                </span>
+              </span>
+              <span
+                className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand-slate group-hover:text-brand-ink"
+                style={{ writingMode: "vertical-rl" }}
+              >
+                Agente
+              </span>
+            </button>
+          )}
         </ProjectContext.Provider>
       )}
     </AppShell>
