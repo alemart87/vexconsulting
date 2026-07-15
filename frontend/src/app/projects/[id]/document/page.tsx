@@ -166,6 +166,17 @@ export default function DocumentPage() {
   }, []);
   const [, setNowTick] = useState(0); // refresca el «guardado hace X»
   const [focusMode, setFocusMode] = useState(false);
+  // Panel del Investigador plegable (patrón copilot): más lienzo para el
+  // documento cuando se está escribiendo. Persiste entre sesiones.
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  useEffect(() => {
+    setPanelCollapsed(localStorage.getItem("vex_doc_panel_v1") === "1");
+  }, []);
+  const togglePanel = () =>
+    setPanelCollapsed((v) => {
+      localStorage.setItem("vex_doc_panel_v1", v ? "0" : "1");
+      return !v;
+    });
   const [outline, setOutline] = useState<{ text: string; level: number }[]>([]);
   const [activeHeading, setActiveHeading] = useState(-1);
   const headingElsRef = useRef<HTMLElement[]>([]);
@@ -1064,6 +1075,9 @@ export default function DocumentPage() {
   // esa sección (con memoria de hilo y búsqueda web incluidas).
   const handleDeepDive = (selection: string) => {
     setFocusMode(false);
+    // Si el panel estaba plegado, se abre solo: la acción lo necesita
+    setPanelCollapsed(false);
+    localStorage.setItem("vex_doc_panel_v1", "0");
     setPanelTab("investigador");
     setConvId(null);
     setThread([]);
@@ -1602,7 +1616,7 @@ export default function DocumentPage() {
       {/* ==== Índice + Editor + Panel de agentes ==== */}
       <div
         className={`grid gap-4 ${
-          focusMode
+          focusMode || panelCollapsed
             ? "xl:grid-cols-[210px_minmax(0,1fr)]"
             : "xl:grid-cols-[210px_minmax(0,1fr)_minmax(0,36%)]"
         }`}
@@ -1653,11 +1667,18 @@ export default function DocumentPage() {
 
         {!focusMode && (
         <aside
-          className="xl:sticky xl:top-20 h-fit space-y-3"
+          className={`h-fit space-y-3 ${
+            panelCollapsed
+              ? "xl:hidden"
+              : "xl:sticky xl:top-20 xl:h-[calc(100vh-6rem)] xl:flex xl:flex-col xl:space-y-0 xl:gap-3"
+          }`}
           data-tour="panel-ia"
         >
-          <div className="card overflow-hidden">
-            <div className="flex border-b border-brand-border">
+          {/* Panel a ALTURA COMPLETA en desktop (patrón copilot): el hilo
+              scrollea adentro y el composer queda anclado abajo, siempre a
+              mano — como los paneles de los asistentes pro. */}
+          <div className="card overflow-hidden xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
+            <div className="flex border-b border-brand-border shrink-0">
               <button
                 className={`flex-1 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider2 transition-colors ${
                   panelTab === "investigador"
@@ -1678,10 +1699,17 @@ export default function DocumentPage() {
               >
                 💬 Chat del proyecto
               </button>
+              <button
+                className="hidden xl:flex items-center justify-center w-9 shrink-0 border-l border-brand-border text-brand-slate hover:text-brand-ink hover:bg-brand-bg transition-colors"
+                onClick={togglePanel}
+                title="Plegar el panel — más lienzo para el documento"
+              >
+                ⟩
+              </button>
             </div>
 
             {panelTab === "investigador" ? (
-              <div className="p-3 space-y-2.5">
+              <div className="p-3 space-y-2.5 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
                 {/* Selector de hilos: todos los hilos quedan guardados */}
                 {convList.length > 0 && (
                   <div className="flex items-center gap-2">
@@ -1714,7 +1742,10 @@ export default function DocumentPage() {
                 )}
 
                 {/* Hilo de investigación con memoria */}
-                <div ref={threadScrollRef} className="max-h-[58vh] overflow-y-auto space-y-2.5 pr-1">
+                <div
+                  ref={threadScrollRef}
+                  className="max-h-[58vh] xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto space-y-2.5 pr-1"
+                >
                   {thread.length === 0 && !aiLoading && (
                     <p className="text-xs text-brand-slate leading-relaxed py-2">
                       Escribí abajo qué investigar. El investigador recuerda todo el hilo:
@@ -2044,11 +2075,11 @@ export default function DocumentPage() {
                 )}
               </div>
             ) : (
-              <div className="p-2">
+              <div className="p-2 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
                 <AgentChat
                   projectId={params.id}
                   roleSlug={project?.agent_role_slug}
-                  heightClass="h-[58vh]"
+                  heightClass="h-[58vh] xl:h-auto xl:flex-1 xl:min-h-0"
                   onProposal={(p) => setProposals((prev) => [...prev, p])}
                 />
               </div>
@@ -2060,7 +2091,7 @@ export default function DocumentPage() {
               pintado debajo del navbar y de la toolbar del editor. */}
 
           {proposals.length > 0 && (
-            <div className="card p-3 space-y-2">
+            <div className="card p-3 space-y-2 xl:shrink-0 xl:max-h-[32vh] xl:overflow-y-auto scrollbar-thin">
               <div className="label !mb-0">✨ Propuestas del chat</div>
               {proposals.map((p) => (
                 <div key={p.id} className="rounded-md border border-brand-border p-2.5 animate-pop">
@@ -2086,6 +2117,26 @@ export default function DocumentPage() {
         </aside>
         )}
       </div>
+
+      {/* Pestaña flotante para reabrir el Investigador (desktop, plegado).
+          Va más arriba que la pestaña del Agente Cowork para no superponerse. */}
+      {!focusMode && panelCollapsed && (
+        <button
+          onClick={togglePanel}
+          title="Abrir el Investigador — investiga con fuentes y edita el documento"
+          className="hidden xl:flex fixed right-0 top-[22%] z-30 flex-col items-center gap-2 rounded-l-2xl bg-white border border-r-0 border-brand-primary/40 shadow-elevated px-2 py-3.5 hover:pr-3.5 transition-all group"
+        >
+          <span className="text-xl leading-none" aria-hidden>
+            🔬
+          </span>
+          <span
+            className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand-primary"
+            style={{ writingMode: "vertical-rl" }}
+          >
+            Investigador
+          </span>
+        </button>
+      )}
 
       {/* Modo lectura del investigador (a nivel raíz por stacking context) */}
       {reader && (
