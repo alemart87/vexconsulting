@@ -177,6 +177,32 @@ export default function DocumentPage() {
       localStorage.setItem("vex_doc_panel_v1", v ? "0" : "1");
       return !v;
     });
+  // Altura REAL del panel: hasta el borde inferior de la ventana desde donde
+  // esté ahora (con la página arriba del todo arranca más abajo, y una altura
+  // fija de 100vh dejaba el input cortado fuera de la vista). Se recalcula en
+  // scroll/resize escribiendo directo el style (sin re-renders).
+  // Callback-ref: el aside aparece recién cuando el documento cargó, así que
+  // un ref común + effect al montar se perdía el elemento (quedaba sin altura).
+  const [panelEl, setPanelEl] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = panelEl;
+    if (!el || panelCollapsed || focusMode) return;
+    const apply = () => {
+      if (window.innerWidth < 1280) {
+        el.style.height = "";
+        return;
+      }
+      const top = Math.max(el.getBoundingClientRect().top, 80);
+      el.style.height = `${Math.max(window.innerHeight - top - 16, 380)}px`;
+    };
+    apply();
+    window.addEventListener("scroll", apply, { passive: true });
+    window.addEventListener("resize", apply);
+    return () => {
+      window.removeEventListener("scroll", apply);
+      window.removeEventListener("resize", apply);
+    };
+  }, [panelEl, panelCollapsed, focusMode]);
   const [outline, setOutline] = useState<{ text: string; level: number }[]>([]);
   const [activeHeading, setActiveHeading] = useState(-1);
   const headingElsRef = useRef<HTMLElement[]>([]);
@@ -1667,10 +1693,11 @@ export default function DocumentPage() {
 
         {!focusMode && (
         <aside
+          ref={setPanelEl}
           className={`h-fit space-y-3 ${
             panelCollapsed
               ? "xl:hidden"
-              : "xl:sticky xl:top-20 xl:h-[calc(100vh-6rem)] xl:flex xl:flex-col xl:space-y-0 xl:gap-3"
+              : "xl:sticky xl:top-20 xl:flex xl:flex-col xl:space-y-0 xl:gap-3"
           }`}
           data-tour="panel-ia"
         >
