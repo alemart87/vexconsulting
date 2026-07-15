@@ -1444,6 +1444,10 @@ export default function DocumentPage() {
         </div>
       )}
 
+      {/* Cabecera en DOS filas con aire: metadatos silenciosos arriba,
+          barra de acciones contenida abajo (jerarquía clara, sin descuadres
+          por wrapping impredecible de una sola fila). */}
+      <div className="space-y-2.5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="text-xs text-brand-slate flex items-center gap-2 flex-wrap">
           {/* Estado de guardado en vivo */}
@@ -1495,6 +1499,10 @@ export default function DocumentPage() {
               historial
             </Link>
           </span>
+        </div>
+
+        {/* Derecha: presencia + modos de vista (acciones silenciosas) */}
+        <div className="flex items-center gap-2 flex-wrap text-xs text-brand-slate">
           <button
             className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
               focusMode
@@ -1575,8 +1583,12 @@ export default function DocumentPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Barra de acciones contenida: automatizaciones a la izquierda,
+          guardar a la derecha — todo alineado a una misma altura */}
         {editable && (
-          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+          <div className="card !rounded-xl px-3 py-2 flex items-center gap-2 flex-wrap">
             <button
               className="btn px-4 py-1.5 text-xs whitespace-nowrap text-white order-1 bg-gradient-to-r from-brand-ink to-[#2a2f3a] hover:from-black hover:to-brand-ink shadow-soft"
               onClick={() => setAutoDialog(true)}
@@ -1621,7 +1633,7 @@ export default function DocumentPage() {
               {repairing ? "Ordenando…" : "🧹 Reparar orden"}
             </button>
             <input
-              className="input flex-1 min-w-[140px] sm:!w-64 sm:flex-none !py-1.5 text-xs order-3 sm:order-2"
+              className="input flex-1 min-w-[140px] sm:!w-64 sm:flex-none !py-1.5 text-xs order-3 sm:order-2 sm:ml-auto"
               placeholder="Resumen del cambio (opcional)"
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
@@ -1828,7 +1840,7 @@ export default function DocumentPage() {
                                   </button>
                                   {editable && (
                                     <button
-                                      className="btn-primary !py-1 text-xs flex-1"
+                                      className="btn-secondary !py-1 text-xs flex-1"
                                       onClick={() => insertText(t.content)}
                                     >
                                       ⤵ Insertar en el cursor
@@ -1938,27 +1950,13 @@ export default function DocumentPage() {
                         </button>
                       </div>
                     )}
-                    <div className="flex gap-2 items-end" data-tour="composer">
-                      <button
-                        className="h-11 w-11 shrink-0 rounded-md border border-brand-border bg-white text-xl leading-none flex items-center justify-center transition-colors hover:border-brand-primary hover:text-brand-primary disabled:opacity-40"
-                        title="Adjuntar imagen o audio: se analiza con IA y queda guardado como fuente"
-                        disabled={aiLoading || attaching}
-                        onClick={() => attachInputRef.current?.click()}
-                      >
-                        📎
-                      </button>
-                      <button
-                        className={`h-11 w-11 shrink-0 rounded-md border text-xl leading-none flex items-center justify-center transition-colors disabled:opacity-40 ${
-                          recording
-                            ? "bg-brand-primary border-brand-primary text-white animate-pulse"
-                            : "border-brand-border bg-white hover:border-brand-primary hover:text-brand-primary"
-                        }`}
-                        title="Nota de voz: grabá tu consulta o datos, se transcribe y se guarda como fuente"
-                        disabled={aiLoading || attaching}
-                        onClick={toggleRecording}
-                      >
-                        🎙
-                      </button>
+                    {/* Composer contenido (patrón AI-chat): la consulta arriba,
+                        las herramientas ADENTRO abajo — una sola caja alineada
+                        en vez de tres controles de alturas distintas. */}
+                    <div
+                      data-tour="composer"
+                      className="relative rounded-xl border border-brand-border bg-white focus-within:border-brand-primary/50 focus-within:ring-2 focus-within:ring-brand-primary/10 transition-all"
+                    >
                       <input
                         ref={attachInputRef}
                         type="file"
@@ -1970,7 +1968,6 @@ export default function DocumentPage() {
                           e.currentTarget.value = "";
                         }}
                       />
-                      <div className="relative flex-1">
                         {mentionQuery !== null && (
                           <div className="absolute bottom-full mb-1 left-0 right-0 card shadow-elevated p-1 z-30 max-h-52 overflow-y-auto animate-pop">
                             <div className="px-2 py-1 text-[10px] uppercase tracking-wider2 text-brand-slate">
@@ -2008,7 +2005,7 @@ export default function DocumentPage() {
                           </div>
                         )}
                         <textarea
-                          className="input !py-2 text-[13px] resize-none w-full"
+                          className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-[13px] leading-relaxed focus:outline-none disabled:opacity-50"
                           rows={2}
                           placeholder={
                             thread.length
@@ -2031,37 +2028,49 @@ export default function DocumentPage() {
                           }}
                           disabled={aiLoading}
                         />
-                      </div>
-                      <button
-                        className="btn-primary !py-2.5"
-                        disabled={aiLoading || !aiQuery.trim()}
-                        onClick={requestResearch}
-                      >
-                        {aiLoading ? "…" : "Investigar"}
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-brand-slate">
-                      <label
-                        data-tour="rigor"
-                        className="flex items-center gap-1.5"
-                        title="Académico: prioriza publicaciones revisadas por pares (papers, estudios) vía Perplexity search_mode=academic"
-                      >
-                        Rigor:
-                        <select
-                          className="bg-transparent font-semibold text-brand-ink focus:outline-none cursor-pointer"
-                          value={rigor}
-                          onChange={(e) => setRigor(e.target.value as any)}
+                      {/* Fila de herramientas dentro del composer */}
+                      <div className="flex items-center gap-1 px-2 pb-2">
+                        <button
+                          className="h-8 w-8 rounded-lg text-base leading-none flex items-center justify-center text-brand-slate hover:bg-brand-bg hover:text-brand-primary transition-colors disabled:opacity-40"
+                          title="Adjuntar imagen o audio: se analiza con IA y queda guardado como fuente"
+                          disabled={aiLoading || attaching}
+                          onClick={() => attachInputRef.current?.click()}
                         >
-                          <option value="estandar">Estándar</option>
-                          <option value="academico">🎓 Académico</option>
-                        </select>
-                      </label>
-                      <div className="flex items-center gap-3">
-                        <details className="relative">
-                          <summary className="cursor-pointer hover:text-brand-ink list-none">
-                            ✍ Ayuda de redacción
+                          📎
+                        </button>
+                        <button
+                          className={`h-8 w-8 rounded-lg text-base leading-none flex items-center justify-center transition-colors disabled:opacity-40 ${
+                            recording
+                              ? "bg-brand-primary text-white animate-pulse"
+                              : "text-brand-slate hover:bg-brand-bg hover:text-brand-primary"
+                          }`}
+                          title="Nota de voz: grabá tu consulta o datos, se transcribe y se guarda como fuente"
+                          disabled={aiLoading || attaching}
+                          onClick={toggleRecording}
+                        >
+                          🎙
+                        </button>
+                        <span className="w-px h-4 bg-brand-border mx-1" />
+                        <label
+                          data-tour="rigor"
+                          className="flex items-center gap-1 text-[11px] text-brand-slate"
+                          title="Académico: prioriza publicaciones revisadas por pares (papers, estudios) vía Perplexity search_mode=academic"
+                        >
+                          Rigor:
+                          <select
+                            className="bg-transparent font-semibold text-brand-ink focus:outline-none cursor-pointer"
+                            value={rigor}
+                            onChange={(e) => setRigor(e.target.value as any)}
+                          >
+                            <option value="estandar">Estándar</option>
+                            <option value="academico">🎓 Académico</option>
+                          </select>
+                        </label>
+                        <details className="relative ml-1">
+                          <summary className="cursor-pointer list-none text-[11px] text-brand-slate hover:text-brand-ink">
+                            ✍ Redacción
                           </summary>
-                          <div className="absolute bottom-6 right-0 card shadow-elevated p-2 flex flex-col gap-1 w-52 z-20 animate-pop">
+                          <div className="absolute bottom-7 left-0 card shadow-elevated p-2 flex flex-col gap-1 w-52 z-20 animate-pop">
                             {AI_ACTIONS.map((a) => (
                               <button
                                 key={a.label}
@@ -2074,6 +2083,14 @@ export default function DocumentPage() {
                             ))}
                           </div>
                         </details>
+                        <span className="flex-1" />
+                        <button
+                          className="btn-primary !py-1.5 !px-4 text-xs"
+                          disabled={aiLoading || !aiQuery.trim()}
+                          onClick={requestResearch}
+                        >
+                          {aiLoading ? "…" : "Investigar"}
+                        </button>
                       </div>
                     </div>
 

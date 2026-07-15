@@ -586,66 +586,81 @@ function FlowCanvas({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Barra de herramientas */}
-      <div className="relative flex items-center gap-1.5 flex-wrap px-3 py-2 border-b border-brand-border bg-brand-bg-soft/60">
-        {PALETTE.map((p) => (
-          <button
-            key={p.type}
-            title={p.title}
-            className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[11px] font-semibold text-brand-graphite hover:border-brand-cyan hover:text-brand-cyan transition-colors"
-            onClick={() => addNode(p.type)}
-          >
-            {p.icon} {p.label}
-          </button>
-        ))}
-        <span className="w-px h-5 bg-brand-border mx-1" />
-        <input
-          className="input !py-1.5 text-xs flex-1 min-w-[120px] max-w-[220px]"
-          placeholder={selected ? "Etiqueta…" : "Seleccioná para etiquetar"}
-          value={selectedLabel}
-          disabled={!selected}
-          onChange={(e) => updateLabel(e.target.value)}
-        />
-        {/* Icono y asignación: solo con un NODO seleccionado */}
-        <button
-          className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[13px] leading-none disabled:opacity-40 hover:border-brand-cyan transition-colors"
-          disabled={!selectedNode}
-          title="Icono del nodo seleccionado"
-          onClick={() => { setIconOpen((v) => !v); setAssignOpen(false); }}
-        >
-          {String(selectedNode?.data?.icon || "🙂")}
-        </button>
-        <button
-          className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[11px] font-semibold text-brand-graphite disabled:opacity-40 hover:border-brand-cyan hover:text-brand-cyan transition-colors"
-          disabled={!selectedNode}
-          title="Asignar este paso a un integrante (le llega la campana)"
-          onClick={() => { setAssignOpen((v) => !v); setIconOpen(false); }}
-        >
-          👤 Asignar
-        </button>
-        <div className="ml-auto flex items-center gap-1.5">
-          <span className="text-[10px] text-brand-mist tabular-nums mr-1">
-            {saveState === "saving" ? "Guardando…" : saveState === "dirty" ? "Sin guardar" : "✓ Guardado"}
-          </span>
-          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={tidyUp}
-            title="Reordenar automáticamente el diagrama (capas sin cruces)">
-            ⇅ Ordenar
-          </button>
-          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={exportPng}
-            disabled={exporting}
-            title="Descargar el diagrama COMPLETO como imagen (aunque no entre en pantalla)">
-            {exporting ? "Exportando…" : "⬇ PNG"}
-          </button>
-          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={insertIntoDocument}
-            disabled={inserting}
-            title="Insertar el flujograma en el documento maestro como sección propia, antes de las Referencias (si ya estaba, se actualiza sin duplicar)">
-            {inserting ? "Insertando…" : "📄 Al documento"}
-          </button>
-          <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={onToggleExpand}
-            title={expanded ? "Salir de pantalla completa (Esc)" : "Ampliar a pantalla completa"}>
-            {expanded ? "✕ Cerrar" : "⛶ Ampliar"}
-          </button>
+      {/* Barra de herramientas: formas + acciones siempre; las herramientas
+          del elemento seleccionado aparecen SOLO al seleccionar (divulgación
+          progresiva, como los controles de tabla de Google Docs). */}
+      <div className="relative border-b border-brand-border bg-brand-bg-soft/60">
+        <div className="flex items-center gap-1.5 flex-wrap px-3 py-2">
+          {PALETTE.map((p) => (
+            <button
+              key={p.type}
+              title={p.title}
+              className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[11px] font-semibold text-brand-graphite hover:border-brand-cyan hover:text-brand-cyan transition-colors"
+              onClick={() => addNode(p.type)}
+            >
+              {p.icon} {p.label}
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-[10px] text-brand-mist tabular-nums mr-1">
+              {saveState === "saving" ? "Guardando…" : saveState === "dirty" ? "Sin guardar" : "✓ Guardado"}
+            </span>
+            <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={tidyUp}
+              title="Reordenar automáticamente el diagrama (capas sin cruces)">
+              ⇅ Ordenar
+            </button>
+            <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={exportPng}
+              disabled={exporting}
+              title="Descargar el diagrama COMPLETO como imagen (aunque no entre en pantalla)">
+              {exporting ? "Exportando…" : "⬇ PNG"}
+            </button>
+            <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={insertIntoDocument}
+              disabled={inserting}
+              title="Insertar el flujograma en el documento maestro como sección propia, antes de las Referencias (si ya estaba, se actualiza sin duplicar)">
+              {inserting ? "Insertando…" : "📄 Al documento"}
+            </button>
+            <button className="btn-ghost !py-1.5 !px-2 text-xs" onClick={onToggleExpand}
+              title={expanded ? "Salir de pantalla completa (Esc)" : "Ampliar a pantalla completa"}>
+              {expanded ? "✕ Cerrar" : "⛶ Ampliar"}
+            </button>
+          </div>
         </div>
+
+        {/* Fila contextual del elemento seleccionado */}
+        {selected && (
+          <div className="flex items-center gap-2 flex-wrap px-3 pb-2 animate-fade">
+            <span className="text-[10px] uppercase tracking-wider2 font-bold text-brand-cyan shrink-0">
+              {selectedNode ? "● Nodo" : "● Conector"}
+            </span>
+            <input
+              className="input !py-1.5 text-xs flex-1 min-w-[140px] max-w-[280px]"
+              placeholder="Etiqueta…"
+              value={selectedLabel}
+              onChange={(e) => updateLabel(e.target.value)}
+            />
+            {selectedNode && (
+              <>
+                <button
+                  className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[13px] leading-none hover:border-brand-cyan transition-colors"
+                  title="Icono del nodo seleccionado"
+                  onClick={() => { setIconOpen((v) => !v); setAssignOpen(false); }}
+                >
+                  {String(selectedNode?.data?.icon || "🙂")}
+                </button>
+                <button
+                  className="px-2 py-1.5 rounded-md border border-brand-border bg-white text-[11px] font-semibold text-brand-graphite hover:border-brand-cyan hover:text-brand-cyan transition-colors"
+                  title="Asignar este paso a un integrante (le llega la campana)"
+                  onClick={() => { setAssignOpen((v) => !v); setIconOpen(false); }}
+                >
+                  👤 Asignar
+                </button>
+              </>
+            )}
+            <span className="text-[10px] text-brand-mist hidden sm:inline">
+              Supr borra · Esc deselecciona
+            </span>
+          </div>
+        )}
 
         {/* Popover: iconos */}
         {iconOpen && selectedNode && (
