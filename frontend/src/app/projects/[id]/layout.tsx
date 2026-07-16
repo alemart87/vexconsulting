@@ -326,13 +326,17 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                  baja de línea manteniendo la alineación. */
               <nav className="hidden md:flex items-start gap-x-3 gap-y-3 flex-wrap border-t border-brand-border/70 py-2.5">
                 {visibleGroups.map((g) => (
+                  /* Cada zona es una «bandeja» tintada con su color de acento a
+                     muy baja intensidad — se leen tres secciones al instante,
+                     sin animaciones. Vex Cowork lleva el tinte algo más
+                     presente por ser la zona colaborativa. */
                   <div
                     key={g.label}
-                    className={`min-w-0 pt-1 pb-1 ${
-                      g.label === "Vex Cowork"
-                        ? "cowork-shine bg-white rounded-xl px-2"
-                        : ""
-                    }`}
+                    className="min-w-0 rounded-xl px-2 pt-1 pb-1"
+                    style={{
+                      background: `${g.accent}${g.label === "Vex Cowork" ? "12" : "09"}`,
+                      border: `1px solid ${g.accent}${g.label === "Vex Cowork" ? "3D" : "24"}`,
+                    }}
                   >
                     <div className="flex items-center gap-1.5 mb-1.5 pl-1 select-none">
                       <span
@@ -349,7 +353,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                           key={t.href}
                           href={`${base}${t.href}`}
                           data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
-                          className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors ${
+                          className={`flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors ${
                             isActive(t.href)
                               ? "bg-brand-primary text-white shadow-soft"
                               : "text-brand-graphite hover:bg-brand-bg hover:text-brand-ink"

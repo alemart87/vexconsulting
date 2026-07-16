@@ -388,53 +388,6 @@ h3,
 }
 .tiptap .selectedCell { background: rgba(0, 178, 191, 0.08); }
 
-/* ===== Brillo Vex Cowork: borde degradado con los colores Voicenter
-   girando lento + halo suave. Distingue la zona colaborativa de las
-   otras dos sin gritar. ===== */
-.cowork-shine {
-  position: relative;
-  border-radius: 0.75rem;
-  box-shadow:
-    0 0 16px rgba(0, 178, 191, 0.14),
-    0 0 8px rgba(230, 51, 42, 0.07);
-}
-.cowork-shine::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: linear-gradient(
-    120deg,
-    #e6332a,
-    #f39200,
-    #00b2bf,
-    #662483,
-    #e6332a
-  );
-  background-size: 300% 300%;
-  animation: cowork-sheen 7s linear infinite;
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  pointer-events: none;
-}
-@keyframes cowork-sheen {
-  to {
-    background-position: 300% 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .cowork-shine::before {
-    animation: none;
-  }
-}
-
 /* Diff de versiones */
 .diff-line-add { @apply bg-emerald-50 text-emerald-800 block px-2; }
 .diff-line-del { @apply bg-red-50 text-red-700 block px-2 line-through; }
