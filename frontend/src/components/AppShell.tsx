@@ -42,7 +42,7 @@ const TOUR_APP: TourStep[] = [
   },
   {
     title: "Las secciones del proyecto",
-    body: "Al entrar a un proyecto vas a ver su menú lateral de secciones (Resumen, Documento, KnowHub…). Tocá el botón ? de arriba estando DENTRO de un proyecto y te las recorremos una por una.",
+    body: "Al entrar a un proyecto vas a ver sus pestañas de secciones arriba (Resumen, Documento, KnowHub…). Tocá el botón ? de arriba estando DENTRO de un proyecto y te las recorremos una por una.",
   },
 ];
 
@@ -52,7 +52,7 @@ const TOUR_APP: TourStep[] = [
 const TOUR_PROJECT: TourStep[] = [
   {
     title: "Las secciones del proyecto",
-    body: "Cada proyecto se trabaja desde este menú lateral, organizado en tres zonas: Trabajo, Vex Cowork y Control. Te mostramos qué hay en cada sección — 40 segundos.",
+    body: "Cada proyecto se trabaja desde estas pestañas, organizadas en tres zonas: Trabajo, Vex Cowork y Control. Con «⌃ Ocultar» las plegás para trabajar a pantalla completa. Te mostramos qué hay en cada sección — 40 segundos.",
   },
   {
     target: '[data-tour="tab-resumen"]',
