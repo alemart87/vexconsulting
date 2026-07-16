@@ -169,7 +169,7 @@ const GROUPS = [
   },
 ];
 
-const RAIL_KEY = "vex_nav_rail_v1";
+const NAV_KEY = "vex_topnav_v1";
 const DOCK_KEY = "vex_agent_dock_v1";
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
@@ -178,8 +178,8 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   const router = useRouter();
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [error, setError] = useState("");
-  // Contraído = solo iconos (más lienzo para Documento/Flows). Persiste.
-  const [collapsed, setCollapsed] = useState(false);
+  // Pestañas del proyecto ocultas = contenido a pantalla completa. Persiste.
+  const [navHidden, setNavHidden] = useState(false);
   // Dock del Agente Cowork: panel lateral derecho plegable (patrón copilot).
   const [dockOpen, setDockOpen] = useState(false);
   // Proyectos que se vincularon a ESTE (ej.: materiales de un plan de curso)
@@ -194,13 +194,13 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
   useEffect(reload, [params.id]);
 
   useEffect(() => {
-    setCollapsed(localStorage.getItem(RAIL_KEY) === "1");
+    setNavHidden(localStorage.getItem(NAV_KEY) === "1");
     setDockOpen(localStorage.getItem(DOCK_KEY) === "1");
   }, []);
 
-  const toggleRail = () => {
-    setCollapsed((v) => {
-      localStorage.setItem(RAIL_KEY, v ? "0" : "1");
+  const toggleNav = () => {
+    setNavHidden((v) => {
+      localStorage.setItem(NAV_KEY, v ? "0" : "1");
       return !v;
     });
   };
@@ -279,15 +279,70 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
         <div className="card p-8 text-center text-brand-primary-dark">{error}</div>
       ) : (
         <ProjectContext.Provider value={{ project, reload }}>
-          {/* ===== Mobile / tablet (< lg): título compacto + selector ===== */}
-          <div className="lg:hidden">
-            <div className="mb-2 min-w-0">
-              <h1 className="font-display text-xl uppercase text-brand-ink leading-none truncate">
-                {project?.name ?? "…"}
-              </h1>
-              <div className="mt-1.5 flex items-center gap-2 flex-wrap">{statusBadges}</div>
+          {/* ===== UNA sola navegación, ARRIBA (patrón GitHub): identidad del
+               proyecto + pestañas en una tarjeta bajo el header global.
+               «Ocultar» pliega las pestañas para dar toda la pantalla al
+               contenido. Sin scroll horizontal jamás: si no entran, las
+               pestañas bajan de línea (wrap). ===== */}
+          <div className="card px-4 pt-2.5 pb-0 mb-5">
+            <div className="flex items-center justify-between gap-3 pb-2.5 flex-wrap">
+              <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+                <h1
+                  className="font-display text-lg sm:text-xl uppercase text-brand-ink leading-none truncate max-w-[46vw]"
+                  title={project?.name ?? ""}
+                >
+                  {project?.name ?? "…"}
+                </h1>
+                <div className="flex items-center gap-1.5 flex-wrap">{statusBadges}</div>
+              </div>
+              <button
+                onClick={toggleNav}
+                className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-brand-border px-3 py-1 text-[11px] font-semibold text-brand-slate hover:border-brand-ink hover:text-brand-ink transition-colors shrink-0"
+                title={
+                  navHidden
+                    ? "Mostrar las secciones del proyecto"
+                    : "Ocultar las secciones para trabajar a pantalla completa"
+                }
+              >
+                {navHidden ? `⌄ Secciones · ${currentTab?.label ?? ""}` : "⌃ Ocultar"}
+              </button>
             </div>
-            <div className="sticky top-16 z-30 -mx-4 px-4 pt-1 pb-3 mb-4 bg-brand-bg/95 backdrop-blur-sm border-b border-brand-border/60">
+
+            {!navHidden && (
+              <nav className="hidden md:flex items-center gap-1 flex-wrap border-t border-brand-border/70 py-2">
+                {visibleGroups.map((g, gi) => (
+                  <div key={g.label} className="flex items-center gap-1">
+                    {gi > 0 && <span className="w-px h-5 bg-brand-border mx-1.5" aria-hidden />}
+                    <span
+                      className="hidden xl:flex items-center gap-1 pr-1 text-[9px] font-bold uppercase tracking-[0.18em] select-none"
+                      style={{ color: g.accent }}
+                      title={g.label === "Vex Cowork" ? g.label : `Zona de ${g.label.toLowerCase()}`}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: g.accent }} />
+                      {g.label}
+                    </span>
+                    {g.tabs.map((t) => (
+                      <Link
+                        key={t.href}
+                        href={`${base}${t.href}`}
+                        data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
+                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider2 whitespace-nowrap transition-colors ${
+                          isActive(t.href)
+                            ? "bg-brand-primary text-white shadow-soft"
+                            : "text-brand-graphite hover:bg-brand-bg hover:text-brand-ink"
+                        }`}
+                      >
+                        <NavIcon name={t.icon} className="h-3.5 w-3.5" />
+                        {t.label}
+                      </Link>
+                    ))}
+                  </div>
+                ))}
+              </nav>
+            )}
+
+            {/* Mobile: selector compacto (siempre visible) */}
+            <div className="md:hidden pb-2.5">
               <label className="sr-only" htmlFor="project-nav">
                 Sección del proyecto
               </label>
@@ -323,93 +378,7 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             </div>
           </div>
 
-          {/* ===== Desktop (lg+): barra lateral + contenido ===== */}
           <div className="lg:flex lg:items-start lg:gap-5">
-            <aside
-              className={`hidden lg:flex flex-col shrink-0 sticky top-20 self-start max-h-[calc(100vh-5.5rem)] transition-[width] duration-200 ${
-                collapsed ? "w-[66px]" : "w-60"
-              }`}
-            >
-              <div className="rounded-2xl glass-ink flex flex-col min-h-0 overflow-hidden">
-                {/* Identidad del proyecto — el título vive acá y libera lo de arriba */}
-                {collapsed ? (
-                  <div
-                    className="mx-auto mt-3 mb-1 h-9 w-9 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center font-display text-white text-lg uppercase select-none"
-                    title={project?.name ?? ""}
-                  >
-                    {(project?.name ?? "·").slice(0, 1)}
-                  </div>
-                ) : (
-                  <div className="px-4 pt-3.5 pb-3 border-b border-white/10">
-                    <h1
-                      className="font-display text-lg uppercase text-white leading-tight line-clamp-2"
-                      title={project?.name ?? ""}
-                    >
-                      {project?.name ?? "…"}
-                    </h1>
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">{statusBadges}</div>
-                  </div>
-                )}
-
-                <nav className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-2 py-2">
-                  {visibleGroups.map((g, gi) => (
-                    <div key={g.label} className={gi > 0 ? "mt-3 pt-3 border-t border-white/10" : ""}>
-                      <div
-                        className={`flex items-center gap-1.5 select-none ${
-                          collapsed ? "justify-center pb-1.5" : "px-2 pb-1.5"
-                        }`}
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full shrink-0"
-                          style={{ background: g.accent, boxShadow: `0 0 6px ${g.accent}` }}
-                        />
-                        {!collapsed && (
-                          <span
-                            className="text-[9px] font-bold uppercase tracking-[0.2em] leading-none"
-                            style={{ color: g.accent, filter: "brightness(1.6) saturate(0.7)" }}
-                          >
-                            {g.label}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-0.5">
-                        {g.tabs.map((t) => (
-                          <Link
-                            key={t.href}
-                            href={`${base}${t.href}`}
-                            data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
-                            title={collapsed ? t.label : undefined}
-                            className={`flex items-center gap-2.5 rounded-lg text-xs font-semibold uppercase tracking-wider2 transition-colors ${
-                              collapsed ? "justify-center px-0 py-2" : "px-2.5 py-1.5"
-                            } ${
-                              isActive(t.href)
-                                ? "pill-liquid text-white"
-                                : "text-white/70 hover:text-white hover:bg-white/10"
-                            }`}
-                          >
-                            <NavIcon
-                              name={t.icon}
-                              className={collapsed ? "h-[18px] w-[18px]" : "h-4 w-4"}
-                            />
-                            {!collapsed && <span className="truncate">{t.label}</span>}
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </nav>
-
-                <button
-                  onClick={toggleRail}
-                  className="border-t border-white/10 px-2 py-2 text-[10px] font-bold uppercase tracking-wider2 text-white/50 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center gap-1.5"
-                  title={collapsed ? "Expandir menú" : "Contraer menú (solo iconos)"}
-                >
-                  <span aria-hidden>{collapsed ? "»" : "«"}</span>
-                  {!collapsed && <span>Contraer</span>}
-                </button>
-              </div>
-            </aside>
-
             <div className="flex-1 min-w-0">{children}</div>
 
             {/* ===== Dock del Agente Cowork (lg+): panel derecho plegable.
