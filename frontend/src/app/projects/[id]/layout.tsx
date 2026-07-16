@@ -205,6 +205,17 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
     });
   };
 
+  // Si arranca la visita guiada con las pestañas ocultas, se muestran solas
+  // (la guía las recorre una por una).
+  useEffect(() => {
+    const show = () => {
+      setNavHidden(false);
+      localStorage.setItem(NAV_KEY, "0");
+    };
+    window.addEventListener("vex:tour-project", show);
+    return () => window.removeEventListener("vex:tour-project", show);
+  }, []);
+
   const toggleDock = () => {
     setDockOpen((v) => {
       localStorage.setItem(DOCK_KEY, v ? "0" : "1");
@@ -309,33 +320,39 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             </div>
 
             {!navHidden && (
-              <nav className="hidden md:flex items-center gap-1 flex-wrap border-t border-brand-border/70 py-2">
-                {visibleGroups.map((g, gi) => (
-                  <div key={g.label} className="flex items-center gap-1">
-                    {gi > 0 && <span className="w-px h-5 bg-brand-border mx-1.5" aria-hidden />}
-                    <span
-                      className="hidden xl:flex items-center gap-1 pr-1 text-[9px] font-bold uppercase tracking-[0.18em] select-none"
-                      style={{ color: g.accent }}
-                      title={g.label === "Vex Cowork" ? g.label : `Zona de ${g.label.toLowerCase()}`}
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: g.accent }} />
-                      {g.label}
-                    </span>
-                    {g.tabs.map((t) => (
-                      <Link
-                        key={t.href}
-                        href={`${base}${t.href}`}
-                        data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
-                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider2 whitespace-nowrap transition-colors ${
-                          isActive(t.href)
-                            ? "bg-brand-primary text-white shadow-soft"
-                            : "text-brand-graphite hover:bg-brand-bg hover:text-brand-ink"
-                        }`}
-                      >
-                        <NavIcon name={t.icon} className="h-3.5 w-3.5" />
-                        {t.label}
-                      </Link>
-                    ))}
+              /* Tres bloques de zona, cada uno con su rótulo ARRIBA y sus
+                 pestañas debajo — nada mezclado en una línea: estructura
+                 clara, alineada y con aire. Si no entran, el bloque entero
+                 baja de línea manteniendo la alineación. */
+              <nav className="hidden md:flex items-start gap-x-5 gap-y-3 flex-wrap border-t border-brand-border/70 py-2.5">
+                {visibleGroups.map((g) => (
+                  <div key={g.label} className="min-w-0">
+                    <div className="flex items-center gap-1.5 mb-1.5 pl-1 select-none">
+                      <span
+                        className="h-1.5 w-1.5 rounded-full shrink-0"
+                        style={{ background: g.accent }}
+                      />
+                      <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand-slate leading-none">
+                        {g.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {g.tabs.map((t) => (
+                        <Link
+                          key={t.href}
+                          href={`${base}${t.href}`}
+                          data-tour={`tab-${t.href.replace("/", "") || "resumen"}`}
+                          className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap transition-colors ${
+                            isActive(t.href)
+                              ? "bg-brand-primary text-white shadow-soft"
+                              : "text-brand-graphite hover:bg-brand-bg hover:text-brand-ink"
+                          }`}
+                        >
+                          <NavIcon name={t.icon} className="h-3.5 w-3.5" />
+                          {t.label}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </nav>

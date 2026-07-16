@@ -80,24 +80,34 @@ const TOUR_PROJECT: TourStep[] = [
     body: "Hipótesis, hallazgos y tareas en tablero kanban. Se pueden mencionar con @ desde el chat y asignar a miembros (con notificación).",
   },
   {
-    target: '[data-tour="tab-knowhub"]',
-    title: "KnowHub",
-    body: "Entendé el proyecto en minutos: resumen de audio estilo podcast, mapa mental interactivo, briefing y FAQ — generados por IA y compartidos con el equipo.",
-  },
-  {
-    target: '[data-tour="tab-chat"]',
-    title: "Chat equipo",
-    body: "Temas y mensajes directos del proyecto, con menciones @ a miembros y notas. Los mensajes nuevos avisan por la campana.",
-  },
-  {
     target: '[data-tour="tab-gantt"]',
     title: "Gantt",
     body: "El cronograma por fases metodológicas, con avance por tarea y generación asistida por IA.",
   },
   {
+    target: '[data-tour="tab-chat"]',
+    title: "Chat equipo",
+    body: "Temas y mensajes directos del proyecto, con menciones @ a miembros, notas y reuniones. Los mensajes nuevos avisan por la campana.",
+  },
+  {
+    target: '[data-tour="tab-meet"]',
+    title: "Vex Meet",
+    body: "Actas de reuniones del equipo: se mencionan personas (les llega la campana), fuentes y notas, y después la reunión se cita con @ desde el chat.",
+  },
+  {
+    target: '[data-tour="tab-flows"]',
+    title: "Flows",
+    body: "Flujogramas de procesos y decisiones: dibujalos a mano o pedile a la IA que los genere desde una instrucción, exportalos a PNG o insertalos en el documento.",
+  },
+  {
     target: '[data-tour="tab-agent"]',
-    title: "Agente IA",
-    body: "Chat con roles expertos que consultan las fuentes del proyecto y proponen texto para el informe.",
+    title: "Agente Cowork",
+    body: "El compañero IA del equipo: tiene el documento leído y conversa en hilos compartidos. Con @ sumás a un colega al hilo y también lo tenés como panel lateral en todo el proyecto.",
+  },
+  {
+    target: '[data-tour="tab-knowhub"]',
+    title: "KnowHub",
+    body: "Entendé el proyecto en minutos: resumen de audio estilo podcast, mapa mental interactivo, briefing y FAQ — generados por IA y compartidos con el equipo.",
   },
   {
     target: '[data-tour="tab-evaluations"]',
@@ -181,6 +191,12 @@ export default function AppShell({
     localStorage.setItem(tourKey, "1");
     setTourOpen(false);
   };
+
+  // La guía del proyecto recorre las pestañas: si el usuario las tenía
+  // ocultas («⌃ Ocultar»), el layout las muestra al recibir este evento.
+  useEffect(() => {
+    if (tourOpen && inProject) window.dispatchEvent(new Event("vex:tour-project"));
+  }, [tourOpen, inProject]);
 
   const onLogout = () => {
     clearSession();
