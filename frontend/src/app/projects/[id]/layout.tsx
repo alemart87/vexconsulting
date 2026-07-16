@@ -324,9 +324,16 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                  pestañas debajo — nada mezclado en una línea: estructura
                  clara, alineada y con aire. Si no entran, el bloque entero
                  baja de línea manteniendo la alineación. */
-              <nav className="hidden md:flex items-start gap-x-5 gap-y-3 flex-wrap border-t border-brand-border/70 py-2.5">
+              <nav className="hidden md:flex items-start gap-x-3 gap-y-3 flex-wrap border-t border-brand-border/70 py-2.5">
                 {visibleGroups.map((g) => (
-                  <div key={g.label} className="min-w-0">
+                  <div
+                    key={g.label}
+                    className={`min-w-0 pt-1 pb-1 ${
+                      g.label === "Vex Cowork"
+                        ? "cowork-shine bg-white rounded-xl px-2"
+                        : ""
+                    }`}
+                  >
                     <div className="flex items-center gap-1.5 mb-1.5 pl-1 select-none">
                       <span
                         className="h-1.5 w-1.5 rounded-full shrink-0"
