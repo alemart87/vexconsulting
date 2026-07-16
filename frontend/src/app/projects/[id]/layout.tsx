@@ -315,6 +315,15 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
                     : "Ocultar las secciones para trabajar a pantalla completa"
                 }
               >
+                {/* Pulso: hace visible que esto se abre/cierra. Más marcado
+                    cuando las secciones están ocultas (invita a reabrir). */}
+                <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                  <span
+                    className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-primary opacity-60"
+                    style={{ animationDuration: navHidden ? "1.6s" : "2.6s" }}
+                  />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-primary" />
+                </span>
                 {navHidden ? `⌄ Secciones · ${currentTab?.label ?? ""}` : "⌃ Ocultar"}
               </button>
             </div>

@@ -1590,7 +1590,7 @@ export default function DocumentPage() {
         {editable && (
           <div className="card !rounded-xl px-3 py-2 flex items-center gap-2 flex-wrap">
             <button
-              className="btn px-4 py-1.5 text-xs whitespace-nowrap text-white order-1 bg-gradient-to-r from-brand-ink to-[#2a2f3a] hover:from-black hover:to-brand-ink shadow-soft"
+              className="btn btn-auto px-4 py-1.5 text-xs whitespace-nowrap text-white order-1 bg-gradient-to-r from-brand-ink to-[#2a2f3a] hover:from-black hover:to-brand-ink shadow-soft"
               onClick={() => setAutoDialog(true)}
               disabled={dirty}
               title={
@@ -1599,6 +1599,13 @@ export default function DocumentPage() {
                   : "El agente investiga por su cuenta y lo inserta en el documento (cola de fondo)"
               }
             >
+              <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                <span
+                  className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-cyan opacity-70"
+                  style={{ animationDuration: "1.8s" }}
+                />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-cyan" />
+              </span>
               Modo automático
             </button>
             <button
