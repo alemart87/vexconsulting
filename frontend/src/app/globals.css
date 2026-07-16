@@ -388,6 +388,33 @@ h3,
 }
 .tiptap .selectedCell { background: rgba(0, 178, 191, 0.08); }
 
+/* ===== Modo automático: halo Voicenter que respira. El botón lanza al
+   agente autónomo — no puede perderse entre los demás. ===== */
+.btn-auto {
+  animation: auto-halo 2.6s ease-in-out infinite;
+}
+@keyframes auto-halo {
+  0%,
+  100% {
+    box-shadow:
+      0 2px 8px rgba(15, 17, 22, 0.25),
+      0 0 0 0 rgba(230, 51, 42, 0.4);
+  }
+  50% {
+    box-shadow:
+      0 2px 8px rgba(15, 17, 22, 0.25),
+      0 0 0 7px rgba(230, 51, 42, 0);
+  }
+}
+.btn-auto:disabled {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-auto {
+    animation: none;
+  }
+}
+
 /* Diff de versiones */
 .diff-line-add { @apply bg-emerald-50 text-emerald-800 block px-2; }
 .diff-line-del { @apply bg-red-50 text-red-700 block px-2 line-through; }
