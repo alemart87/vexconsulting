@@ -13,11 +13,16 @@ Role = Literal[
 ]
 
 
+# Permisos especiales (módulos extra), solo los otorga el superadmin
+Module = Literal["consultorias", "finanzas"]
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=2, max_length=255)
     role: Role = "consultor"
+    extra_modules: Optional[list[Module]] = None
 
 
 class UserUpdate(BaseModel):
@@ -25,6 +30,7 @@ class UserUpdate(BaseModel):
     role: Optional[Role] = None
     is_active: Optional[bool] = None
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    extra_modules: Optional[list[Module]] = None
 
 
 class UserOut(BaseModel):
@@ -32,6 +38,7 @@ class UserOut(BaseModel):
     email: str
     full_name: str
     role: str
+    extra_modules: Optional[list[str]] = None
     photo_url: Optional[str] = None
     is_active: bool
     created_by: Optional[str] = None

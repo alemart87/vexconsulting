@@ -10,6 +10,8 @@ export interface CurrentUserInfo {
   role: string; // superadmin | consultor_lider | consultor_lider_2 | consultor | visualizador | gerente_operaciones
   full_name: string;
   photo_url?: string | null;
+  /** Permisos especiales (módulos extra) otorgados por el superadmin. */
+  modules?: string[];
 }
 
 export function setSession(token: string, refreshToken: string, user: CurrentUserInfo) {
@@ -50,11 +52,28 @@ export const ROLE_LABELS: Record<string, string> = {
   gerente_operaciones: "Gerente de Operaciones",
 };
 
+export const MODULE_LABELS: Record<string, string> = {
+  consultorias: "VexConsultorías",
+  finanzas: "VEXFINANZAS",
+};
+
 /** Página de inicio según el rol: el gerente vive en VEXFINANZAS. */
 export function homeForRole(role?: string | null): string {
   if (role === "visualizador") return "/view";
   if (role === "gerente_operaciones") return "/finanzas";
   return "/dashboard";
+}
+
+/** Acceso a VEXFINANZAS: superadmin, gerentes o permiso especial «finanzas». */
+export function canFinanzas(u?: CurrentUserInfo | null): boolean {
+  if (!u) return false;
+  return u.role === "superadmin" || u.role === "gerente_operaciones" || !!u.modules?.includes("finanzas");
+}
+
+/** Acceso a VexConsultorías: todos salvo el gerente sin permiso especial. */
+export function canConsultorias(u?: CurrentUserInfo | null): boolean {
+  if (!u) return false;
+  return u.role !== "gerente_operaciones" || !!u.modules?.includes("consultorias");
 }
 
 export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): Promise<T> {

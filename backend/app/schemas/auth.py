@@ -22,6 +22,8 @@ class TokenPair(BaseModel):
     user_name: str = ""
     user_id: str = ""
     user_photo_url: Optional[str] = None
+    # Permisos especiales (módulos extra) del usuario
+    user_modules: list[str] = []
     must_change_password: bool = False
     # 2FA obligatorio y aún no configurado: el frontend lleva al perfil a
     # escanear el QR antes de permitir cualquier otra cosa.
@@ -49,3 +51,4 @@ class MeResponse(BaseModel):
     role: str
     full_name: str
     photo_url: Optional[str] = None
+    modules: list[str] = []

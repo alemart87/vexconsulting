@@ -37,6 +37,7 @@ export default function LoginPage() {
       role: data.user_role,
       full_name: data.user_name,
       photo_url: data.user_photo_url,
+      modules: data.user_modules ?? [],
     });
     if (data.must_change_password) {
       window.location.href = "/perfil?pw=obligatorio";

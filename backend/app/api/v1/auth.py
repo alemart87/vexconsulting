@@ -153,6 +153,7 @@ async def login(
         user_name=user.full_name,
         user_id=user.id,
         user_photo_url=user.photo_url,
+        user_modules=[m for m in (user.extra_modules or []) if isinstance(m, str)],
         must_change_password=user.must_change_password,
         must_setup_2fa=settings.require_2fa and not user.totp_enabled,
     )
@@ -224,6 +225,7 @@ async def login_2fa(
         user_name=user.full_name,
         user_id=user.id,
         user_photo_url=user.photo_url,
+        user_modules=[m for m in (user.extra_modules or []) if isinstance(m, str)],
         must_change_password=user.must_change_password,
     )
 
@@ -262,6 +264,7 @@ async def refresh_token(payload: TokenRefresh, db: AsyncSession = Depends(get_db
         user_name=user.full_name,
         user_id=user.id,
         user_photo_url=user.photo_url,
+        user_modules=[m for m in (user.extra_modules or []) if isinstance(m, str)],
         must_change_password=user.must_change_password,
         must_setup_2fa=settings.require_2fa and not user.totp_enabled,
     )
@@ -271,7 +274,7 @@ async def refresh_token(payload: TokenRefresh, db: AsyncSession = Depends(get_db
 async def me(user: CurrentUser = Depends(get_current_user)) -> MeResponse:
     return MeResponse(
         id=user.id, email=user.email, role=user.role,
-        full_name=user.full_name, photo_url=user.photo_url,
+        full_name=user.full_name, photo_url=user.photo_url, modules=user.modules,
     )
 
 

@@ -3,7 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CurrentUserInfo, ROLE_LABELS, clearSession, getToken, getUser, homeForRole } from "@/lib/api";
+import {
+  CurrentUserInfo,
+  ROLE_LABELS,
+  apiFetch,
+  canConsultorias,
+  canFinanzas,
+  clearSession,
+  getToken,
+  getUser,
+  homeForRole,
+  saveUser,
+} from "@/lib/api";
 import Brand from "./Brand";
 import GuidedTour, { TourStep } from "./GuidedTour";
 import NotificationBell from "./NotificationBell";
@@ -173,9 +184,11 @@ export default function AppShell({
     const u = getUser();
     setUser(u);
     if (u?.role === "visualizador") router.replace("/view");
-    // El gerente de operaciones vive en VEXFINANZAS (más su perfil)
+    // El gerente de operaciones vive en VEXFINANZAS (más su perfil), salvo que
+    // el superadmin le haya otorgado el permiso especial «consultorias»
     if (
-      u?.role === "gerente_operaciones" &&
+      u &&
+      !canConsultorias(u) &&
       pathname &&
       !pathname.startsWith("/finanzas") &&
       !pathname.startsWith("/perfil")
@@ -183,6 +196,17 @@ export default function AppShell({
       router.replace("/finanzas");
     }
   }, [router, pathname]);
+
+  // Rol y permisos especiales pueden cambiar mientras la sesión está abierta
+  // (los edita el superadmin): se refrescan desde el servidor al montar.
+  useEffect(() => {
+    apiFetch<{ role: string; modules?: string[]; full_name: string; photo_url?: string | null }>("/api/v1/auth/me")
+      .then((me) => {
+        saveUser({ role: me.role, modules: me.modules ?? [], full_name: me.full_name, photo_url: me.photo_url });
+        setUser(getUser());
+      })
+      .catch(() => {});
+  }, []);
 
   // Se activa sola la primera vez: la general al entrar a la app, y la del
   // proyecto SOLO en el Resumen (nunca emboscar con un modal en una página
@@ -218,7 +242,8 @@ export default function AppShell({
   const isGerente = user.role === "gerente_operaciones";
   const isLider =
     user.role === "consultor_lider" || user.role === "consultor_lider_2" || isSuperadmin;
-  const canFinanzas = isSuperadmin || isGerente;
+  const showFinanzas = canFinanzas(user);
+  const showConsultorias = canConsultorias(user);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -228,7 +253,7 @@ export default function AppShell({
             <Brand />
           </Link>
           <nav className="hidden lg:flex items-center gap-1">
-            {!isGerente && (
+            {showConsultorias && (
               <>
                 <span data-tour="nav-proyectos">
                   <NavLink href="/dashboard" label="Proyectos" />
@@ -239,7 +264,7 @@ export default function AppShell({
                 <NavLink href="/uso" label="Uso colaborativo" />
               </>
             )}
-            {canFinanzas && <NavLink href="/finanzas" label="VEXFINANZAS" />}
+            {showFinanzas && <NavLink href="/finanzas" label="VEXFINANZAS" />}
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isLider && (
               <span data-tour="nav-costos">
@@ -249,7 +274,7 @@ export default function AppShell({
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
           <div className="flex items-center gap-3 shrink-0">
-            {!isGerente && (
+            {showConsultorias && (
             <button
               onClick={() => setTourOpen(true)}
               className="h-9 w-9 rounded-full bg-brand-primary/10 text-brand-primary font-bold text-base border border-brand-primary/30 hover:bg-brand-primary hover:text-white transition-colors flex items-center justify-center shrink-0"
@@ -308,10 +333,10 @@ export default function AppShell({
                 {ROLE_LABELS[user.role] ?? user.role}
               </div>
             </div>
-            {!isGerente && <NavLink href="/dashboard" label="Proyectos" />}
-            {!isGerente && <NavLink href="/metodo" label="Método y fuentes" />}
-            {!isGerente && <NavLink href="/uso" label="Uso colaborativo" />}
-            {canFinanzas && <NavLink href="/finanzas" label="VEXFINANZAS" />}
+            {showConsultorias && <NavLink href="/dashboard" label="Proyectos" />}
+            {showConsultorias && <NavLink href="/metodo" label="Método y fuentes" />}
+            {showConsultorias && <NavLink href="/uso" label="Uso colaborativo" />}
+            {showFinanzas && <NavLink href="/finanzas" label="VEXFINANZAS" />}
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isLider && <NavLink href="/admin/costos" label="Costos IA" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}

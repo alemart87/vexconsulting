@@ -13,7 +13,7 @@ superadmin). Se bloquea en get_current_user cualquier ruta fuera de su alcance.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
@@ -41,6 +41,11 @@ class CurrentUser:
     full_name: str
     photo_url: Optional[str] = None
     must_change_password: bool = False
+    # Permisos especiales (módulos extra) otorgados por el superadmin
+    modules: list[str] = field(default_factory=list)
+
+    def has_module(self, name: str) -> bool:
+        return name in (self.modules or [])
 
     @property
     def is_superadmin(self) -> bool:
@@ -58,7 +63,11 @@ class CurrentUser:
 
     @property
     def is_consultor(self) -> bool:
-        return self.role in ("consultor_lider", "consultor_lider_2", "consultor")
+        """Trabaja en la consultoría: roles consultores o gerente con el
+        módulo «consultorias» otorgado."""
+        return self.role in ("consultor_lider", "consultor_lider_2", "consultor") or (
+            self.is_gerente and self.has_module("consultorias")
+        )
 
     @property
     def is_visualizador(self) -> bool:
@@ -71,8 +80,14 @@ class CurrentUser:
 
     @property
     def can_finanzas(self) -> bool:
-        """Acceso al módulo VEXFINANZAS: superadmin y gerentes (nadie más)."""
-        return self.is_superadmin or self.is_gerente
+        """Acceso a VEXFINANZAS: superadmin, gerentes, o quien tenga el módulo
+        «finanzas» otorgado como permiso especial."""
+        return self.is_superadmin or self.is_gerente or self.has_module("finanzas")
+
+    @property
+    def can_consultorias(self) -> bool:
+        """Acceso a VexConsultorías: todo rol salvo el gerente sin permiso especial."""
+        return not self.is_gerente or self.has_module("consultorias")
 
 
 @dataclass
@@ -136,9 +151,15 @@ async def get_current_user(
     ):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "2fa_setup_required")
 
-    # El gerente de operaciones NO entra a la consultoría: solo su módulo,
-    # su perfil y sus notificaciones.
-    if user.role == "gerente_operaciones" and not _gerente_path_allowed(request.url.path):
+    modules = [m for m in (user.extra_modules or []) if isinstance(m, str)]
+
+    # El gerente de operaciones NO entra a la consultoría (salvo permiso
+    # especial «consultorias»): solo su módulo, su perfil y sus notificaciones.
+    if (
+        user.role == "gerente_operaciones"
+        and "consultorias" not in modules
+        and not _gerente_path_allowed(request.url.path)
+    ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Tu rol solo accede al módulo VEXFINANZAS"
         )
@@ -150,6 +171,7 @@ async def get_current_user(
         full_name=user.full_name,
         photo_url=user.photo_url,
         must_change_password=user.must_change_password,
+        modules=modules,
     )
 
 
@@ -189,8 +211,8 @@ async def require_lider(user: CurrentUser = Depends(get_current_user)) -> Curren
 
 
 async def require_consultor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    """Cualquier rol de consultoría (ni visualizador ni gerente)."""
-    if user.is_visualizador or user.is_gerente:
+    """Cualquier rol de consultoría (ni visualizador ni gerente sin permiso)."""
+    if user.is_visualizador or not user.can_consultorias:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Los visualizadores no acceden a esta función")
     return user
 
