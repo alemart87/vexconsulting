@@ -108,12 +108,15 @@ async def create_user(
     from .auth import _check_password_strength
 
     _check_password_strength(payload.password)
+    if payload.extra_modules and not actor.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el superadmin otorga permisos especiales")
 
     user = User(
         email=email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name.strip(),
         role=payload.role,
+        extra_modules=sorted(set(payload.extra_modules)) if payload.extra_modules else None,
         created_by=actor.id,
         # Seguridad: la contraseña la eligió otro (líder/superadmin) — el
         # sistema exige cambiarla en el primer ingreso.
@@ -124,7 +127,8 @@ async def create_user(
     await log_action(
         db, user_id=actor.id, user_email=actor.email, user_role=actor.role,
         action="user.create", entity_type="user", entity_id=user.id,
-        detail={"email": email, "role": payload.role}, ip=client_ip(request),
+        detail={"email": email, "role": payload.role, "extra_modules": user.extra_modules},
+        ip=client_ip(request),
     )
     await db.refresh(user)
     return UserOut.model_validate(user)
@@ -151,8 +155,15 @@ async def update_user(
         user.full_name = payload.full_name.strip()
         changes["full_name"] = user.full_name
     if payload.role is not None:
+        # Cambio de rol (p. ej. consultor → gerente): los permisos especiales
+        # se conservan; el superadmin los ajusta en la misma pantalla.
         user.role = payload.role
         changes["role"] = payload.role
+    if payload.extra_modules is not None:
+        if not actor.is_superadmin:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el superadmin otorga permisos especiales")
+        user.extra_modules = sorted(set(payload.extra_modules)) or None
+        changes["extra_modules"] = user.extra_modules
     if payload.is_active is not None:
         user.is_active = payload.is_active
         changes["is_active"] = payload.is_active

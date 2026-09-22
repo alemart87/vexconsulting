@@ -52,6 +52,11 @@ async def add_member(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Los visualizadores solo pueden tener permiso de lectura"
         )
+    if user.role == "gerente_operaciones" and "consultorias" not in (user.extra_modules or []):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Este gerente no tiene acceso a VexConsultorías: el superadmin debe otorgárselo en Usuarios",
+        )
     existing = await db.execute(
         select(ProjectMember).where(
             ProjectMember.project_id == project_id, ProjectMember.user_id == payload.user_id

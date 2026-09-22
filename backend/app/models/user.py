@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import JSON, Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
@@ -18,6 +18,11 @@ ROLES = (
     "consultor_lider", "consultor_lider_2", "consultor", "visualizador",
     "gerente_operaciones",
 )
+# Permisos especiales por usuario (los otorga SOLO el superadmin): módulos a
+# los que accede además de lo que da su rol.
+#   consultorias → VexConsultorías (proyectos, chat, agentes) para un gerente
+#   finanzas     → VEXFINANZAS para un consultor/líder
+MODULES = ("consultorias", "finanzas")
 
 
 def _uuid() -> str:
@@ -41,6 +46,8 @@ class User(Base):
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Al cambiar la contraseña se incrementa: los tokens viejos quedan inválidos
     token_version: Mapped[int] = mapped_column(default=0)
+    # Módulos extra otorgados por el superadmin: ["consultorias", "finanzas"]
+    extra_modules: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

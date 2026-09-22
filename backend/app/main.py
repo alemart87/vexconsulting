@@ -42,6 +42,7 @@ REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("users", "totp_secret", "VARCHAR(64)"),
     ("users", "totp_enabled", "BOOLEAN DEFAULT FALSE"),
     ("users", "token_version", "INTEGER DEFAULT 0"),
+    ("users", "extra_modules", "JSON"),
     ("chat_messages", "parent_id", "VARCHAR(36)"),
     ("chat_messages", "reactions", "JSON"),
     ("chat_messages", "edited_at", "TIMESTAMPTZ"),

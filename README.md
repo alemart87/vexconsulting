@@ -38,6 +38,13 @@ Ingresar en `http://localhost:3000` con las credenciales del superadmin del `.en
 | visualizador | por líder | ver solo el documento PUBLICADO + chat restringido |
 | gerente_operaciones | solo por superadmin | módulo VEXFINANZAS únicamente (no entra a la consultoría) |
 
+**Cambio de rol y permisos especiales (solo superadmin).** Desde Usuarios el
+superadmin cambia el rol de cualquier usuario (p. ej. consultor → gerente) y otorga
+módulos extra guardados en `users.extra_modules`: `consultorias` (un gerente entra a
+VexConsultorías y puede ser miembro de proyectos) o `finanzas` (un consultor o líder
+entra a VEXFINANZAS). Los líderes no pueden otorgarlos. El cambio rige en el próximo
+request: la API lee rol y módulos de la base en cada llamada.
+
 ## Seguridad: doble factor obligatorio
 
 Todas las cuentas de la base deben activar TOTP (Google Authenticator, 1Password,
