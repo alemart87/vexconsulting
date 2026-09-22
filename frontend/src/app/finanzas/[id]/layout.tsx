@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
@@ -48,6 +48,17 @@ export default function FinanceSessionLayout({ children }: { children: React.Rea
     const t = setInterval(reload, 1500);
     return () => clearInterval(t);
   }, [session, reload]);
+
+  // Al terminar la ejecución (en cola/ejecutando → analizada) se abre solo el resumen
+  const prevStatus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const prev = prevStatus.current;
+    const now = session?.status;
+    if ((prev === "queued" || prev === "running") && now === "done") {
+      router.push(`/finanzas/${params.id}/resumen`);
+    }
+    prevStatus.current = now;
+  }, [session?.status, params.id, router]);
 
   const base = `/finanzas/${params.id}`;
   const isActive = (href: string) =>

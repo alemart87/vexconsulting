@@ -51,6 +51,8 @@ EXPECTED_COLUMNS = [
 ]
 PREFERRED_SHEET = "horas"
 MAX_ROWS = 250_000
+# Diferencia debe − haber tolerada como redondeo (Gs.): por debajo «cuadra».
+BALANCE_TOLERANCE = 1000
 
 CONCEPT_LABELS: dict[str, str] = {
     "remuneracion": "Remuneraciones",
@@ -444,9 +446,9 @@ def parse_workbook(path: str | Path) -> ParsedFile:
             raise FinanceFileError("El archivo no tiene filas de asientos válidas")
         if parsed.skipped_rows:
             parsed.warnings.append(f"{parsed.skipped_rows} filas sin cuenta, centro o Funcod se omitieron")
-        if parsed.balance_diff != 0:
+        if abs(parsed.balance_diff) >= BALANCE_TOLERANCE:
             parsed.warnings.append(
-                f"El asiento no cuadra: debe − haber = {parsed.balance_diff:,} Gs."
+                f"El asiento no cuadra: debe − haber = {parsed.balance_diff:,} Gs.".replace(",", ".")
             )
         if parsed.dirty_funcods:
             parsed.warnings.append(
@@ -724,10 +726,15 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
             "debit": p.total_debit, "credit": p.total_credit, "diff": p.balance_diff,
             "dirty_funcods": len(p.dirty_funcods),
         })
-        if p.balance_diff != 0:
+        if abs(p.balance_diff) >= BALANCE_TOLERANCE:
             warnings.append({
                 "level": "warn", "code": "unbalanced",
-                "text": f"{f.label}: el asiento {p.entry_number or ''} no cuadra por {p.balance_diff:,} Gs. (redondeo)".replace(",", "."),
+                "text": f"{f.label}: el asiento {p.entry_number or ''} no cuadra por {p.balance_diff:,} Gs.".replace(",", "."),
+            })
+        elif p.balance_diff != 0:
+            warnings.append({
+                "level": "info", "code": "rounding",
+                "text": f"{f.label}: cuadra con diferencia de redondeo de {p.balance_diff:,} Gs.".replace(",", "."),
             })
         dirty_by_code: dict[str, dict] = {}
         for d in p.dirty_funcods:
