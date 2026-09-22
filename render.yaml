@@ -28,6 +28,10 @@ services:
         sync: false
       - key: SUPERADMIN_NAME
         value: Administrador VEX
+      - key: SUPERADMIN_TOTP_SECRET
+        sync: false
+      - key: REQUIRE_2FA
+        value: "true"
       - key: OPENAI_API_KEY
         sync: false
       - key: PERPLEXITY_API_KEY

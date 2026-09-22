@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     superadmin_password_hash: str = ""       # opción avanzada: hash bcrypt
     superadmin_name: str = "Administrador VEX"
 
+    # Doble factor TOTP obligatorio para TODAS las cuentas de la DB: hasta
+    # activarlo, la API solo permite autenticación y cambio de contraseña.
+    require_2fa: bool = True
+    # 2FA del superadmin (vive en .env como el resto de sus credenciales):
+    # secreto base32 generado con `python -c "import pyotp;print(pyotp.random_base32())"`.
+    # Vacío = el superadmin ingresa solo con contraseña (se advierte en el log).
+    superadmin_totp_secret: str = ""
+
     jwt_algorithm: str = "HS256"
     jwt_access_expire_minutes: int = 60
     jwt_refresh_expire_days: int = 7

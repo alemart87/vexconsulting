@@ -1,7 +1,7 @@
 """Gestión jerárquica de usuarios.
 
-superadmin crea líderes, consultores y visualizadores;
-consultor_lider crea consultores y visualizadores (no líderes).
+superadmin crea líderes, consultores, visualizadores y gerentes de operaciones;
+consultor_lider crea consultores y visualizadores (no líderes ni gerentes).
 """
 from __future__ import annotations
 
@@ -57,10 +57,11 @@ async def upload_my_photo(
 
 
 def _can_manage_role(actor: CurrentUser, target_role: str) -> bool:
-    """Jerarquía: el superadmin gestiona todo; el líder TITULAR gestiona
-    suplentes, consultores y visualizadores; el SUPLENTE (consultor_lider_2)
-    tiene las mismas atribuciones hacia abajo pero no gestiona líderes ni a
-    otros suplentes — depende del titular."""
+    """Jerarquía: el superadmin gestiona todo (incluidos los gerentes de
+    operaciones, que SOLO él crea); el líder TITULAR gestiona suplentes,
+    consultores y visualizadores; el SUPLENTE (consultor_lider_2) tiene las
+    mismas atribuciones hacia abajo pero no gestiona líderes ni a otros
+    suplentes — depende del titular."""
     if actor.is_superadmin:
         return True
     if actor.is_lider_titular:

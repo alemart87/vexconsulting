@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CurrentUserInfo, ROLE_LABELS, clearSession, getToken, getUser } from "@/lib/api";
+import { CurrentUserInfo, ROLE_LABELS, clearSession, getToken, getUser, homeForRole } from "@/lib/api";
 import Brand from "./Brand";
 import GuidedTour, { TourStep } from "./GuidedTour";
 import NotificationBell from "./NotificationBell";
@@ -173,14 +173,23 @@ export default function AppShell({
     const u = getUser();
     setUser(u);
     if (u?.role === "visualizador") router.replace("/view");
-  }, [router]);
+    // El gerente de operaciones vive en VEXFINANZAS (más su perfil)
+    if (
+      u?.role === "gerente_operaciones" &&
+      pathname &&
+      !pathname.startsWith("/finanzas") &&
+      !pathname.startsWith("/perfil")
+    ) {
+      router.replace("/finanzas");
+    }
+  }, [router, pathname]);
 
   // Se activa sola la primera vez: la general al entrar a la app, y la del
   // proyecto SOLO en el Resumen (nunca emboscar con un modal en una página
   // profunda como Flows o el Documento — el ? la abre a mano donde sea).
   const inProjectRoot = !!pathname && /^\/projects\/(?!new)[^/]+$/.test(pathname);
   useEffect(() => {
-    if (!user || user.role === "visualizador") return;
+    if (!user || user.role === "visualizador" || user.role === "gerente_operaciones") return;
     if (inProject && !inProjectRoot) return;
     if (localStorage.getItem(tourKey)) return;
     const timer = setTimeout(() => setTourOpen(true), 900);
@@ -206,22 +215,31 @@ export default function AppShell({
   if (!user) return null;
 
   const isSuperadmin = user.role === "superadmin";
+  const isGerente = user.role === "gerente_operaciones";
   const isLider =
     user.role === "consultor_lider" || user.role === "consultor_lider_2" || isSuperadmin;
+  const canFinanzas = isSuperadmin || isGerente;
 
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-40 bg-white border-b border-brand-border shadow-soft">
         <div className="mx-auto max-w-7xl px-4 h-16 flex items-center justify-between gap-3">
-          <Brand />
+          <Link href={homeForRole(user.role)} className="shrink-0">
+            <Brand />
+          </Link>
           <nav className="hidden lg:flex items-center gap-1">
-            <span data-tour="nav-proyectos">
-              <NavLink href="/dashboard" label="Proyectos" />
-            </span>
-            <span data-tour="nav-metodo">
-              <NavLink href="/metodo" label="Método y fuentes" />
-            </span>
-            <NavLink href="/uso" label="Uso colaborativo" />
+            {!isGerente && (
+              <>
+                <span data-tour="nav-proyectos">
+                  <NavLink href="/dashboard" label="Proyectos" />
+                </span>
+                <span data-tour="nav-metodo">
+                  <NavLink href="/metodo" label="Método y fuentes" />
+                </span>
+                <NavLink href="/uso" label="Uso colaborativo" />
+              </>
+            )}
+            {canFinanzas && <NavLink href="/finanzas" label="VEXFINANZAS" />}
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isLider && (
               <span data-tour="nav-costos">
@@ -231,6 +249,7 @@ export default function AppShell({
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}
           </nav>
           <div className="flex items-center gap-3 shrink-0">
+            {!isGerente && (
             <button
               onClick={() => setTourOpen(true)}
               className="h-9 w-9 rounded-full bg-brand-primary/10 text-brand-primary font-bold text-base border border-brand-primary/30 hover:bg-brand-primary hover:text-white transition-colors flex items-center justify-center shrink-0"
@@ -239,6 +258,7 @@ export default function AppShell({
             >
               ?
             </button>
+            )}
             <span data-tour="campana">
               <NotificationBell />
             </span>
@@ -288,9 +308,10 @@ export default function AppShell({
                 {ROLE_LABELS[user.role] ?? user.role}
               </div>
             </div>
-            <NavLink href="/dashboard" label="Proyectos" />
-            <NavLink href="/metodo" label="Método y fuentes" />
-            <NavLink href="/uso" label="Uso colaborativo" />
+            {!isGerente && <NavLink href="/dashboard" label="Proyectos" />}
+            {!isGerente && <NavLink href="/metodo" label="Método y fuentes" />}
+            {!isGerente && <NavLink href="/uso" label="Uso colaborativo" />}
+            {canFinanzas && <NavLink href="/finanzas" label="VEXFINANZAS" />}
             {isLider && <NavLink href="/admin/users" label="Usuarios" />}
             {isLider && <NavLink href="/admin/costos" label="Costos IA" />}
             {isSuperadmin && <NavLink href="/admin/audit" label="Auditoría" />}

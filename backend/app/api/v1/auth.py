@@ -100,6 +100,14 @@ async def login(
             )
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciales inválidas")
 
+        # Doble factor del superadmin: secreto TOTP en .env (SUPERADMIN_TOTP_SECRET)
+        if settings.superadmin_totp_secret:
+            await log_action(
+                db, user_id="superadmin", user_email=email, user_role="superadmin",
+                action="login_2fa_pending", ip=ip, user_agent=ua,
+            )
+            return TokenPair(requires_2fa=True, temp_token=create_2fa_token(email))
+
         await log_action(
             db, user_id="superadmin", user_email=email, user_role="superadmin",
             action="login", ip=ip, user_agent=ua,
@@ -146,6 +154,7 @@ async def login(
         user_id=user.id,
         user_photo_url=user.photo_url,
         must_change_password=user.must_change_password,
+        must_setup_2fa=settings.require_2fa and not user.totp_enabled,
     )
 
 
@@ -167,7 +176,30 @@ async def login_2fa(
     if data.get("type") != "2fa":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token intermedio inválido")
 
-    result = await db.execute(select(User).where(User.email == data.get("sub")))
+    subject = data.get("sub")
+    ip = client_ip(request)
+
+    # Superadmin: el secreto TOTP vive en .env
+    if subject == settings.superadmin_email.lower().strip() and settings.superadmin_totp_secret:
+        if not pyotp.TOTP(settings.superadmin_totp_secret).verify(payload.code.strip(), valid_window=1):
+            await log_action(
+                db, user_id="superadmin", user_email=subject, action="login_2fa_failed", ip=ip,
+            )
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Código incorrecto o vencido")
+        await log_action(
+            db, user_id="superadmin", user_email=subject, user_role="superadmin",
+            action="login", ip=ip,
+        )
+        return TokenPair(
+            access_token=create_access_token(subject, "superadmin"),
+            refresh_token=create_refresh_token(subject),
+            user_email=subject,
+            user_role="superadmin",
+            user_name=settings.superadmin_name,
+            user_id="superadmin",
+        )
+
+    result = await db.execute(select(User).where(User.email == subject))
     user = result.scalar_one_or_none()
     if not user or not user.is_active or not user.totp_secret:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuario inválido")
@@ -230,6 +262,8 @@ async def refresh_token(payload: TokenRefresh, db: AsyncSession = Depends(get_db
         user_name=user.full_name,
         user_id=user.id,
         user_photo_url=user.photo_url,
+        must_change_password=user.must_change_password,
+        must_setup_2fa=settings.require_2fa and not user.totp_enabled,
     )
 
 
@@ -315,6 +349,11 @@ async def disable_2fa(
 ) -> dict:
     import pyotp
 
+    if settings.require_2fa:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "El doble factor es obligatorio en esta plataforma y no puede desactivarse",
+        )
     target = await db.get(User, user.id) if not user.is_superadmin else None
     if not target or not target.totp_enabled or not target.totp_secret:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "El doble factor no está activo")
@@ -332,6 +371,14 @@ async def status_2fa(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     if user.is_superadmin:
-        return {"enabled": False, "available": False}
+        return {
+            "enabled": bool(settings.superadmin_totp_secret),
+            "available": False,
+            "required": settings.require_2fa,
+        }
     target = await db.get(User, user.id)
-    return {"enabled": bool(target and target.totp_enabled), "available": True}
+    return {
+        "enabled": bool(target and target.totp_enabled),
+        "available": True,
+        "required": settings.require_2fa,
+    }

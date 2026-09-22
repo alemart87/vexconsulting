@@ -39,5 +39,13 @@ async def start_workers() -> list[asyncio.Task]:
     except ImportError:
         pass
 
+    try:
+        from .finance_worker import finance_worker, recover_stale_finance
+
+        await recover_stale_finance()
+        tasks.append(asyncio.create_task(finance_worker(), name="finance_worker"))
+    except ImportError:
+        pass
+
     logger.info("%d workers de fondo iniciados", len(tasks))
     return tasks

@@ -6,6 +6,10 @@ Jerarquía: superadmin > consultor_lider > consultor_lider_2 (suplente)
 el líder (crear usuarios, crear proyectos) pero depende jerárquicamente de
 él: no puede gestionar líderes ni a otros suplentes.
 El acceso a cada proyecto se resuelve con ProjectAccess (permiso efectivo).
+
+gerente_operaciones es un rol INDEPENDIENTE: no participa de la consultoría
+(proyectos, chat, agentes). Solo accede al módulo VEXFINANZAS (junto con el
+superadmin). Se bloquea en get_current_user cualquier ruta fuera de su alcance.
 """
 from __future__ import annotations
 
@@ -60,6 +64,16 @@ class CurrentUser:
     def is_visualizador(self) -> bool:
         return self.role == "visualizador"
 
+    @property
+    def is_gerente(self) -> bool:
+        """Gerente de Operaciones: módulo VEXFINANZAS únicamente."""
+        return self.role == "gerente_operaciones"
+
+    @property
+    def can_finanzas(self) -> bool:
+        """Acceso al módulo VEXFINANZAS: superadmin y gerentes (nadie más)."""
+        return self.is_superadmin or self.is_gerente
+
 
 @dataclass
 class ProjectAccess:
@@ -113,6 +127,22 @@ async def get_current_user(
     if user.must_change_password and not request.url.path.startswith("/api/v1/auth/"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "password_change_required")
 
+    # Doble factor OBLIGATORIO: hasta activar TOTP solo se permite autenticación
+    # (setup/enable del 2FA viven ahí) y el cambio de contraseña.
+    if (
+        settings.require_2fa
+        and not user.totp_enabled
+        and not request.url.path.startswith("/api/v1/auth/")
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "2fa_setup_required")
+
+    # El gerente de operaciones NO entra a la consultoría: solo su módulo,
+    # su perfil y sus notificaciones.
+    if user.role == "gerente_operaciones" and not _gerente_path_allowed(request.url.path):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Tu rol solo accede al módulo VEXFINANZAS"
+        )
+
     return CurrentUser(
         id=user.id,
         email=user.email,
@@ -121,6 +151,28 @@ async def get_current_user(
         photo_url=user.photo_url,
         must_change_password=user.must_change_password,
     )
+
+
+_GERENTE_PREFIXES = (
+    "/api/v1/auth/",
+    "/api/v1/finanzas",
+    "/api/v1/notifications",
+    "/api/v1/users/me/",
+    "/api/v1/avatars/",
+)
+
+
+def _gerente_path_allowed(path: str) -> bool:
+    return any(path.startswith(p) for p in _GERENTE_PREFIXES)
+
+
+async def require_finanzas(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Módulo VEXFINANZAS: superadmin y gerentes de operaciones."""
+    if not user.can_finanzas:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "El módulo VEXFINANZAS es solo para gerentes de operaciones"
+        )
+    return user
 
 
 async def require_superadmin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
@@ -137,8 +189,8 @@ async def require_lider(user: CurrentUser = Depends(get_current_user)) -> Curren
 
 
 async def require_consultor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    """Cualquier rol excepto visualizador."""
-    if user.is_visualizador:
+    """Cualquier rol de consultoría (ni visualizador ni gerente)."""
+    if user.is_visualizador or user.is_gerente:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Los visualizadores no acceden a esta función")
     return user
 
