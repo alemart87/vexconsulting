@@ -275,11 +275,11 @@ export default function ResumenPage() {
               </div>
 
               <div className="card overflow-x-auto scrollbar-thin">
-                <table className="w-full text-sm min-w-[640px]">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead>
                     <tr>
                       <th className={th}>Centro de costo</th>
-                      <th className={thNum}>Personas c/ desc.</th>
+                      <th className={thNum} title="Colaboradores con algún descuento / total del centro">Con desc.</th>
                       <th className={thNum}>Anticipos</th>
                       <th className={thNum}>Promoc.</th>
                       <th className={thNum}>Varios + emb.</th>
@@ -298,7 +298,7 @@ export default function ResumenPage() {
                         <td className={tdNum}>{c.anticipo ? <Money n={c.anticipo} compact /> : <span className="text-brand-mist">—</span>}</td>
                         <td className={tdNum}>{c.descuento_promocional ? <Money n={c.descuento_promocional} compact /> : <span className="text-brand-mist">—</span>}</td>
                         <td className={tdNum}>{c.descuento_varios + c.embargo ? <Money n={c.descuento_varios + c.embargo} compact /> : <span className="text-brand-mist">—</span>}</td>
-                        <td className={`${tdNum} font-semibold`}><Money n={c.total} /></td>
+                        <td className={`${tdNum} font-semibold`}><Money n={c.total} compact /></td>
                         <td className={tdNum}>{pct(c.share_of_net_pay)}</td>
                       </tr>
                     ))}
