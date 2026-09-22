@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch, setSession } from "@/lib/api";
+import { apiFetch, homeForRole, setSession } from "@/lib/api";
 
 /** Fuentes de referencia que respaldan nuestras investigaciones (logo por dominio). */
 const FUENTES_LOGIN = [
@@ -42,7 +42,11 @@ export default function LoginPage() {
       window.location.href = "/perfil?pw=obligatorio";
       return;
     }
-    router.push(data.user_role === "visualizador" ? "/view" : "/dashboard");
+    if (data.must_setup_2fa) {
+      window.location.href = "/perfil?2fa=obligatorio";
+      return;
+    }
+    router.push(homeForRole(data.user_role));
   };
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -112,7 +116,7 @@ export default function LoginPage() {
             método científico.
           </p>
           <div className="mt-8 grid grid-cols-2 gap-3 max-w-md">
-            {["Proyectos", "Fuentes + IA", "Cowork", "Evaluación"].map((m) => (
+            {["Proyectos", "Fuentes + IA", "Cowork", "VEXFINANZAS"].map((m) => (
               <div key={m} className="rounded-lg bg-white/10 px-4 py-3">
                 <div className="h-1 w-8 bg-white/60 rounded mb-2" />
                 <div className="text-sm font-semibold">{m}</div>

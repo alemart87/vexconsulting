@@ -70,13 +70,16 @@ export default function AdminUsersPage() {
             )}
             <option value="consultor">Consultor</option>
             <option value="visualizador">Visualizador (solo lectura de publicados)</option>
+            {isSuperadmin && (
+              <option value="gerente_operaciones">Gerente de Operaciones (VEXFINANZAS)</option>
+            )}
           </select>
           {error && <p className="text-xs text-brand-primary-dark">{error}</p>}
           {ok && <p className="text-xs text-emerald-700">{ok}</p>}
           <button className="btn-primary w-full">Crear</button>
           <p className="text-[11px] text-brand-slate leading-relaxed">
             {isSuperadmin
-              ? "Como superadmin podés crear todos los roles."
+              ? "Como superadmin podés crear todos los roles. El Gerente de Operaciones no participa de la consultoría: accede solo al módulo VEXFINANZAS."
               : isLiderTitular
                 ? "Como consultor líder podés crear suplentes (Consultor líder 2), consultores y visualizadores. El suplente tiene tus mismas atribuciones pero depende de vos."
                 : "Como consultor líder suplente podés crear consultores y visualizadores."}

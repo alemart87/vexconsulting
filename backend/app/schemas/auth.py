@@ -23,6 +23,9 @@ class TokenPair(BaseModel):
     user_id: str = ""
     user_photo_url: Optional[str] = None
     must_change_password: bool = False
+    # 2FA obligatorio y aún no configurado: el frontend lleva al perfil a
+    # escanear el QR antes de permitir cualquier otra cosa.
+    must_setup_2fa: bool = False
     requires_2fa: bool = False
     temp_token: Optional[str] = None
 

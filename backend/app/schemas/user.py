@@ -7,7 +7,10 @@ from typing import Literal, Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
-Role = Literal["consultor_lider", "consultor_lider_2", "consultor", "visualizador"]
+Role = Literal[
+    "consultor_lider", "consultor_lider_2", "consultor", "visualizador",
+    "gerente_operaciones",
+]
 
 
 class UserCreate(BaseModel):

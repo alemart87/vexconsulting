@@ -7,7 +7,7 @@ const USER_KEY = "vex_user";
 export interface CurrentUserInfo {
   id: string;
   email: string;
-  role: string; // superadmin | consultor_lider | consultor_lider_2 | consultor | visualizador
+  role: string; // superadmin | consultor_lider | consultor_lider_2 | consultor | visualizador | gerente_operaciones
   full_name: string;
   photo_url?: string | null;
 }
@@ -47,7 +47,15 @@ export const ROLE_LABELS: Record<string, string> = {
   consultor_lider_2: "Consultor líder 2 (suplente)",
   consultor: "Consultor",
   visualizador: "Visualizador",
+  gerente_operaciones: "Gerente de Operaciones",
 };
+
+/** Página de inicio según el rol: el gerente vive en VEXFINANZAS. */
+export function homeForRole(role?: string | null): string {
+  if (role === "visualizador") return "/view";
+  if (role === "gerente_operaciones") return "/finanzas";
+  return "/dashboard";
+}
 
 export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = getToken();
@@ -77,6 +85,13 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
         window.location.href = "/perfil?pw=obligatorio";
       }
       throw new Error("Debés cambiar tu contraseña para continuar");
+    }
+    // Doble factor obligatorio: hasta escanear el QR no hay otra pantalla
+    if (res.status === 403 && detail === "2fa_setup_required" && typeof window !== "undefined") {
+      if (!window.location.pathname.startsWith("/perfil")) {
+        window.location.href = "/perfil?2fa=obligatorio";
+      }
+      throw new Error("Debés activar la doble autenticación para continuar");
     }
     const err = new Error(detail) as Error & { status?: number };
     err.status = res.status;

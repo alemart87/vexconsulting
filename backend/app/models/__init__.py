@@ -21,3 +21,10 @@ from .knowhub import KnowHubItem  # noqa: F401
 from .auto_mission import AutoMission  # noqa: F401
 from .meeting import Meeting  # noqa: F401
 from .flow import Flow  # noqa: F401
+from .finance import (  # noqa: F401
+    FinanceCollaborator,
+    FinanceEntry,
+    FinanceFile,
+    FinanceNote,
+    FinanceSession,
+)

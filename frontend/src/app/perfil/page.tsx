@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { apiFetch, getUser, saveUser as patchUser } from "@/lib/api";
+import { apiFetch, getUser, homeForRole, saveUser as patchUser } from "@/lib/api";
 
 export default function PerfilPage() {
   const user = typeof window !== "undefined" ? getUser() : null;
@@ -10,6 +10,11 @@ export default function PerfilPage() {
   const forced =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("pw") === "obligatorio";
+  // Doble factor obligatorio: la API bloquea todo hasta escanear el QR
+  const forced2fa =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("2fa") === "obligatorio";
+  const home = homeForRole(user?.role);
 
   /* ---- Foto de perfil ---- */
   const fileRef = useRef<HTMLInputElement>(null);
@@ -32,6 +37,9 @@ export default function PerfilPage() {
       setPhotoMsg(`⚠ ${e.message}`);
     }
   };
+
+  /* ---- 2FA (estado; la lógica va más abajo) ---- */
+  const [tfa, setTfa] = useState<{ enabled: boolean; available: boolean; required?: boolean } | null>(null);
 
   /* ---- Contraseña ---- */
   const [pwCurrent, setPwCurrent] = useState("");
@@ -56,7 +64,12 @@ export default function PerfilPage() {
       setPwCurrent("");
       setPwNew("");
       setPwConfirm("");
-      if (forced) setTimeout(() => (window.location.href = "/dashboard"), 900);
+      // Tras el cambio obligatorio: si falta el 2FA, seguimos acá; si no, a la home del rol
+      if (forced) {
+        setTimeout(() => {
+          window.location.href = tfa && !tfa.enabled && tfa.required ? "/perfil?2fa=obligatorio" : home;
+        }, 900);
+      }
     } catch (e: any) {
       setPwMsg(`⚠ ${e.message}`);
     } finally {
@@ -65,7 +78,6 @@ export default function PerfilPage() {
   };
 
   /* ---- 2FA ---- */
-  const [tfa, setTfa] = useState<{ enabled: boolean; available: boolean } | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [tfaSecret, setTfaSecret] = useState<string | null>(null);
   const [tfaCode, setTfaCode] = useState("");
@@ -97,11 +109,12 @@ export default function PerfilPage() {
         method: "POST",
         body: JSON.stringify({ code: tfaCode }),
       });
-      setTfa({ enabled: true, available: true });
+      setTfa((t) => ({ enabled: true, available: true, required: t?.required }));
       setQrDataUrl(null);
       setTfaSecret(null);
       setTfaCode("");
       setTfaMsg("✓ Doble factor ACTIVADO — se pedirá el código en cada ingreso");
+      if (forced2fa) setTimeout(() => (window.location.href = home), 1200);
     } catch (e: any) {
       setTfaMsg(`⚠ ${e.message}`);
     }
@@ -134,6 +147,14 @@ export default function PerfilPage() {
           🔐 <b>Cambio de contraseña obligatorio.</b> Tu contraseña fue definida por un
           administrador: por seguridad, elegí una propia para continuar usando la
           plataforma.
+        </div>
+      )}
+      {forced2fa && !tfa?.enabled && (
+        <div className="rounded-md bg-brand-orange/10 border border-brand-orange/50 px-4 py-3 text-sm mb-5 animate-pop">
+          🔐 <b>Doble autenticación obligatoria.</b> Esta plataforma exige un segundo
+          factor para todas las cuentas. Activalo con Google Authenticator (o similar) en
+          la tarjeta de la derecha: escaneá el QR e ingresá el código. Hasta entonces no
+          se puede usar el resto del sistema.
         </div>
       )}
 
@@ -229,11 +250,13 @@ export default function PerfilPage() {
         </div>
 
         {/* 2FA */}
-        <div className="card p-6">
+        <div className={`card p-6 ${forced2fa && !tfa?.enabled ? "ring-2 ring-brand-orange" : ""}`}>
           <h2 className="label mb-4">Doble autenticación (2FA)</h2>
           {isSuperadmin || tfa?.available === false ? (
             <p className="text-sm text-brand-slate">
-              No disponible para la cuenta superadmin del servidor.
+              {tfa?.enabled
+                ? "Activo para el superadmin: el secreto TOTP se administra en la configuración del servidor (SUPERADMIN_TOTP_SECRET)."
+                : "El superadmin lo configura en el servidor (.env): SUPERADMIN_TOTP_SECRET."}
             </p>
           ) : tfa?.enabled ? (
             <div className="space-y-3">
@@ -242,21 +265,31 @@ export default function PerfilPage() {
                 <b className="text-brand-ink">Activo</b>
                 <span className="text-brand-slate">— se pide código al ingresar</span>
               </div>
-              <input
-                className="input"
-                placeholder="Código actual para desactivar"
-                value={tfaCode}
-                inputMode="numeric"
-                maxLength={8}
-                onChange={(e) => setTfaCode(e.target.value)}
-              />
-              <button
-                className="btn-danger w-full !py-2"
-                disabled={tfaCode.length < 6}
-                onClick={disable2fa}
-              >
-                Desactivar 2FA
-              </button>
+              {tfa.required ? (
+                <p className="text-xs text-brand-slate leading-relaxed">
+                  El doble factor es obligatorio en esta plataforma y no puede desactivarse.
+                  Si cambiás de teléfono, pedile a un administrador que restablezca tu
+                  contraseña: al hacerlo se vuelve a configurar el 2FA.
+                </p>
+              ) : (
+                <>
+                  <input
+                    className="input"
+                    placeholder="Código actual para desactivar"
+                    value={tfaCode}
+                    inputMode="numeric"
+                    maxLength={8}
+                    onChange={(e) => setTfaCode(e.target.value)}
+                  />
+                  <button
+                    className="btn-danger w-full !py-2"
+                    disabled={tfaCode.length < 6}
+                    onClick={disable2fa}
+                  >
+                    Desactivar 2FA
+                  </button>
+                </>
+              )}
             </div>
           ) : qrDataUrl ? (
             <div className="space-y-3">

@@ -12,7 +12,12 @@ from ..core.database import Base
 # Jerarquía: consultor_lider > consultor_lider_2 (suplente, para equipos
 # grandes: mismas atribuciones que el líder pero depende de él) > consultor
 # > visualizador.
-ROLES = ("consultor_lider", "consultor_lider_2", "consultor", "visualizador")
+# gerente_operaciones: rol INDEPENDIENTE de la consultoría. Lo crea solo el
+# superadmin y accede únicamente al módulo VEXFINANZAS.
+ROLES = (
+    "consultor_lider", "consultor_lider_2", "consultor", "visualizador",
+    "gerente_operaciones",
+)
 
 
 def _uuid() -> str:

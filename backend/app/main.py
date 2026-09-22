@@ -172,6 +172,12 @@ def _security_startup_checks() -> None:
                 "SUPERADMIN_PASSWORD en texto plano en producción — usá "
                 "SUPERADMIN_PASSWORD_HASH (bcrypt)."
             )
+        if settings.require_2fa and not settings.superadmin_totp_secret:
+            logger.warning(
+                "2FA obligatorio activo pero el superadmin no tiene SUPERADMIN_TOTP_SECRET: "
+                "ingresa solo con contraseña. Generá uno con "
+                "`python -c \"import pyotp;print(pyotp.random_base32())\"`."
+            )
 
 
 @asynccontextmanager
@@ -231,7 +237,7 @@ app.include_router(versions_router.router, prefix=API)
 app.include_router(audit_router.router, prefix=API)
 
 # Routers de fases 2-4 se montan si existen (import tolerante durante el desarrollo)
-for module_name in ("sources", "search", "notes", "gantt", "agent", "auto", "evaluations", "exports", "metrics", "files", "chat", "notifications", "knowhub", "meetings", "cowork", "flows"):
+for module_name in ("sources", "search", "notes", "gantt", "agent", "auto", "evaluations", "exports", "metrics", "files", "chat", "notifications", "knowhub", "meetings", "cowork", "flows", "finanzas"):
     try:
         module = __import__(f"app.api.v1.{module_name}", fromlist=["router"])
         app.include_router(module.router, prefix=API)
