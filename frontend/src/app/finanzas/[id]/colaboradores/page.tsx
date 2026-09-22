@@ -31,6 +31,9 @@ export default function CollaboratorsPage() {
   const [cc, setCc] = useState("");
   const [category, setCategory] = useState("");
   const [egreso, setEgreso] = useState("");
+  const [multi, setMulti] = useState(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("multi_cc") === "true" ? "true" : ""
+  );
   const [position, setPosition] = useState("");
   const [sort, setSort] = useState("cost");
   const [order, setOrder] = useState("desc");
@@ -58,13 +61,14 @@ export default function CollaboratorsPage() {
     if (cc) p.set("cc", cc);
     if (category) p.set("category", category);
     if (egreso) p.set("egreso", egreso);
+    if (multi) p.set("multi_cc", multi);
     if (position) p.set("position", position);
     p.set("sort", sort);
     p.set("order", order);
     p.set("page", String(page));
     p.set("size", String(SIZE));
     return p.toString();
-  }, [qApplied, cc, category, egreso, position, sort, order, page]);
+  }, [qApplied, cc, category, egreso, multi, position, sort, order, page]);
 
   useEffect(() => {
     setLoading(true);
@@ -125,6 +129,14 @@ export default function CollaboratorsPage() {
             {positions.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Centros</label>
+          <select className="input !w-auto" value={multi} onChange={(e) => resetPage(setMulti)(e.target.value)}>
+            <option value="">Indistinto</option>
+            <option value="true">En varios centros</option>
+            <option value="false">En un solo centro</option>
           </select>
         </div>
         <div>

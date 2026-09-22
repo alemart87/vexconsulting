@@ -11,6 +11,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,7 @@ from ...models.finance import (
     FinanceSession,
 )
 from ...services.audit_service import log_action
+from ...services.finance_export import build_workbook, safe_filename
 from ...services.finance_service import (
     CONCEPT_LABELS,
     FinanceFileError,
@@ -670,6 +672,116 @@ async def cost_center_detail(
 
 
 # ---------------------------------------------------------------------------
+# Exportación a Excel
+# ---------------------------------------------------------------------------
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _with_labels(entries, labels: dict[str, str]):
+    for e in entries:
+        e.file_label = labels.get(e.file_id, "?")  # atributo transitorio para la hoja
+        yield e
+
+
+async def _export_response(request, user, session, *, kind: str, entity_id: str, title: str,
+                           summary_rows, accounts, collaborators, entries, filename: str, db) -> Response:
+    data = build_workbook(
+        title=title, session_name=session.name, period_label=period_label(session.period),
+        summary_rows=summary_rows, accounts=accounts, collaborators=collaborators, entries=entries,
+    )
+    await log_action(
+        db, user_id=user.id, user_email=user.email, user_role=user.role,
+        action=f"finanzas.export.{kind}", entity_type="finance_session", entity_id=session.id,
+        detail={"target": entity_id, "bytes": len(data), "filename": filename}, ip=client_ip(request),
+    )
+    return Response(
+        content=data, media_type=_XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/sessions/{session_id}/cost-centers/{cc_code}/export")
+async def export_cost_center(
+    session_id: str,
+    cc_code: int,
+    request: Request,
+    user: CurrentUser = Depends(require_finanzas),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Excel del centro: resumen y cuentas, colaboradores (con su gasto en el
+    centro) y todos los movimientos."""
+    session = await _get_session(session_id, user, db)
+    detail = await cost_center_detail(session_id, cc_code, user, db)
+    center = detail["center"]
+    labels = await _file_labels(db, session_id)
+    entries = (await db.execute(
+        select(FinanceEntry).where(FinanceEntry.session_id == session_id, FinanceEntry.cc_code == cc_code)
+        .order_by(FinanceEntry.employee_name, FinanceEntry.file_id, FinanceEntry.orden, FinanceEntry.account_code)
+    )).scalars().all()
+    summary_rows = [
+        ("Centro de costo", f"{center['code']} · {center['desc']}"),
+        ("Cliente / negocio", center["client"]),
+        ("Personas", center["people"]),
+        ("Mensualeros", center["mensualeros"]),
+        ("Jornaleros", center["jornaleros"]),
+        ("Egresos", center["egresos"]),
+        ("Gasto del mes (Gs.)", center["cost"]),
+        ("Participación en el gasto total", round(center["share"], 4)),
+        ("Costo promedio por persona (Gs.)", center["avg_cost"]),
+        ("Neto a pagar (Gs.)", center.get("net_pay", 0)),
+        ("Anticipos y descuentos (Gs.)", center.get("deductions_total", 0)),
+        ("Líneas de asiento", center["rows"]),
+    ]
+    filename = safe_filename(session.period or session.name, str(cc_code), center["desc"])
+    return await _export_response(
+        request, user, session, kind="cost_center", entity_id=str(cc_code),
+        title=f"Centro de costo {center['code']} · {center['desc']}",
+        summary_rows=summary_rows, accounts=detail["accounts"], collaborators=detail["people"],
+        entries=_with_labels(entries, labels), filename=filename, db=db,
+    )
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_session(
+    session_id: str,
+    request: Request,
+    user: CurrentUser = Depends(require_finanzas),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Excel de la sesión completa: resumen gerencial, todos los colaboradores
+    y todos los movimientos."""
+    session = await _get_session(session_id, user, db)
+    summary = _require_done(session)
+    labels = await _file_labels(db, session_id)
+    collabs = (await db.execute(
+        select(FinanceCollaborator).where(FinanceCollaborator.session_id == session_id)
+        .order_by(FinanceCollaborator.total_cost.desc())
+    )).scalars().all()
+    entries = (await db.execute(
+        select(FinanceEntry).where(FinanceEntry.session_id == session_id)
+        .order_by(FinanceEntry.cc_code, FinanceEntry.employee_name, FinanceEntry.file_id, FinanceEntry.orden)
+    )).scalars().all()
+    t = summary["totals"]
+    summary_rows = [
+        ("Archivos", t["files"]), ("Líneas de asiento", t["rows"]), ("Colaboradores únicos", t["collaborators"]),
+        ("En más de un centro", t["multi_cc_people"]), ("Centros de costo", t["cost_centers"]),
+        ("Cuentas", t["accounts"]), ("Gasto total (Gs.)", t["cost"]), ("Neto a pagar (Gs.)", t["net_pay"]),
+        ("IPS a pagar (Gs.)", t["ips"]), ("Anticipos y descuentos (Gs.)", t["deductions"]),
+        ("Costo promedio por persona (Gs.)", t["avg_cost_per_person"]),
+    ]
+    for key, c in summary.get("categories", {}).items():
+        summary_rows.append((f"{c['label']}: personas / gasto", f"{c['people']} / {c['cost']}"))
+    filename = safe_filename(session.period or "sesion", session.name)
+    return await _export_response(
+        request, user, session, kind="session", entity_id=session_id,
+        title=f"Sesión {session.name}", summary_rows=summary_rows, accounts=summary.get("accounts", []),
+        collaborators=[_collab_out(c) for c in collabs], entries=_with_labels(entries, labels),
+        filename=filename, db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Colaboradores
 # ---------------------------------------------------------------------------
 
@@ -681,6 +793,7 @@ async def list_collaborators(
     account: Optional[int] = Query(default=None),
     category: Optional[str] = Query(default=None, pattern=r"^(mensualero|jornalero|sin_clasificar)$"),
     egreso: Optional[bool] = Query(default=None),
+    multi_cc: Optional[bool] = Query(default=None, description="Solo los imputados a más de un centro"),
     position: Optional[str] = Query(default=None, max_length=80),
     sort: str = Query(default="cost", pattern=r"^(cost|name|net_pay|funcod|cc)$"),
     order: str = Query(default="desc", pattern=r"^(asc|desc)$"),
@@ -700,6 +813,8 @@ async def list_collaborators(
         query = query.where(FinanceCollaborator.category == category)
     if egreso is not None:
         query = query.where(FinanceCollaborator.is_egreso == egreso)
+    if multi_cc is not None:
+        query = query.where(FinanceCollaborator.cc_count > 1 if multi_cc else FinanceCollaborator.cc_count <= 1)
     if position:
         query = query.where(FinanceCollaborator.position == position)
     if cc is not None or account is not None:

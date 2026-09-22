@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
 import { EmptyState, Money, ShareBar, StatTile, TableWrap, td, tdNum, th, thNum } from "@/components/finanzas/ui";
 import { apiFetch } from "@/lib/api";
 import { CHART, KIND_LABEL, balanceStatus, gs, gsCompact, int, pct, type FinSummary } from "@/lib/finanzas";
+import { CategoryBadge } from "@/components/finanzas/ui";
 
 const axisStyle = { fontSize: 11, fill: CHART.slate };
 
@@ -68,6 +69,19 @@ export default function ResumenPage() {
     [summary]
   );
   const [showAllDed, setShowAllDed] = useState(false);
+  // Colaboradores en varios centros: fila expandida (clic) y lista completa
+  const [openMulti, setOpenMulti] = useState<Record<string, boolean>>({});
+  const [showAllMulti, setShowAllMulti] = useState(false);
+  const multiCenters = useMemo(
+    () =>
+      (summary?.multi_cc?.by_cost_center ?? []).slice(0, 12).map((c) => ({
+        name: c.desc.replace(/^V\s*-\s*/i, "").slice(0, 28),
+        code: c.code,
+        people: c.people,
+        cost: c.cost,
+      })),
+    [summary]
+  );
 
   if (error) return <EmptyState title="Sin resumen" body={error} />;
   if (!summary) return <div className="card p-10 text-center text-brand-slate">Cargando…</div>;
@@ -214,6 +228,128 @@ export default function ResumenPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* Colaboradores imputados a varios centros de costo */}
+      <section>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="label !mb-0">Colaboradores en más de un centro de costo</h2>
+          {summary.multi_cc && (
+            <Link href={`${base}/colaboradores?multi_cc=true`} className="text-xs text-brand-primary hover:underline">
+              Ver los {int(summary.multi_cc.people)} en Colaboradores →
+            </Link>
+          )}
+        </div>
+        {!summary.multi_cc ? (
+          <div className="card p-5 mt-2 text-sm text-brand-slate">
+            Esta sesión se ejecutó con una versión anterior: volvé a presionar «Ejecutar VeXFinanzas» para ver esta sección.
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-brand-slate mt-1 mb-2">
+              Una persona puede estar imputada a varios centros en el mismo mes. Su costo se reparte por línea
+              entre esos centros y <b>nunca se cuenta dos veces</b> en los totales de la sesión.
+              {" "}
+              {Object.entries(summary.multi_cc.by_count)
+                .sort((a, b) => Number(a[0]) - Number(b[0]))
+                .map(([n, k]) => `${k} en ${n} centros`)
+                .join(" · ")}
+              .
+            </p>
+            <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-4">
+              <StatTile label="Colaboradores compartidos" value={int(summary.multi_cc.people)} hint={`de ${int(t.collaborators)} (${pct(t.collaborators ? summary.multi_cc.people / t.collaborators : 0)})`} />
+              <StatTile label="Gasto que se reparte" value={gsCompact(summary.multi_cc.cost)} full={gs(summary.multi_cc.cost)} hint={`${pct(t.cost ? summary.multi_cc.cost / t.cost : 0)} del gasto total`} />
+              <StatTile label="Máximo de centros" value={int(summary.multi_cc.max_centers)} hint="Para una misma persona" />
+              <StatTile label="Centros con compartidos" value={int(summary.multi_cc.by_cost_center.length)} hint={`de ${int(t.cost_centers)} centros`} />
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[2fr_3fr]">
+              <div className="card p-5">
+                <h3 className="label">Centros con más colaboradores compartidos</h3>
+                <div style={{ height: Math.max(240, multiCenters.length * 26 + 40) }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={multiCenters} layout="vertical" margin={{ left: 4, right: 40, top: 8, bottom: 4 }} barCategoryGap={4}>
+                      <CartesianGrid horizontal={false} stroke={CHART.grid} />
+                      <XAxis type="number" tick={axisStyle} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" width={160} tick={axisStyle} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        {...tooltipStyle()}
+                        formatter={(v: any) => [int(Number(v)), "Compartidos"]}
+                        labelFormatter={(l: any, p: any) => `${l}${p?.[0]?.payload?.code ? ` (${p[0].payload.code})` : ""} · reciben ${gs(p?.[0]?.payload?.cost ?? 0)}`}
+                      />
+                      <Bar dataKey="people" fill={CHART.single} radius={[0, 4, 4, 0]} isAnimationActive={false}
+                        label={{ position: "right", fontSize: 10, fill: CHART.slate }} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="card overflow-x-auto scrollbar-thin">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead>
+                    <tr>
+                      <th className={th}>Colaborador · clic para ver el reparto</th>
+                      <th className={th}>Tipo</th>
+                      <th className={th}>Puesto</th>
+                      <th className={thNum}>Centros</th>
+                      <th className={thNum}>Gasto total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(showAllMulti ? summary.multi_cc.items : summary.multi_cc.items.slice(0, 12)).map((m) => {
+                      const open = !!openMulti[m.funcod];
+                      return (
+                        <Fragment key={m.funcod}>
+                          <tr
+                            className="hover:bg-brand-bg-soft cursor-pointer"
+                            onClick={() => setOpenMulti((o) => ({ ...o, [m.funcod]: !open }))}
+                          >
+                            <td className={td}>
+                              <span className="text-brand-slate text-xs mr-1">{open ? "▾" : "▸"}</span>
+                              <span className="font-semibold text-brand-ink">{m.name}</span>
+                              <div className="text-[11px] text-brand-slate pl-4">Funcod {m.funcod}</div>
+                            </td>
+                            <td className={td}><CategoryBadge category={m.category} egreso={m.is_egreso} /></td>
+                            <td className={td}>{m.position ?? "—"}</td>
+                            <td className={`${tdNum} font-semibold`}>{int(m.cc_count)}</td>
+                            <td className={tdNum}><Money n={m.total_cost} /></td>
+                          </tr>
+                          {open && (
+                            <tr>
+                              <td colSpan={5} className="px-3 pb-3 pt-0 border-t-0 bg-brand-bg-soft">
+                                <div className="rounded-md border border-brand-border bg-white divide-y divide-brand-border">
+                                  {m.centers.map((c) => (
+                                    <div key={c.code} className="flex items-center gap-3 px-3 py-1.5 text-xs">
+                                      <Link href={`${base}/centros/${c.code}`} className="flex-1 text-brand-ink hover:text-brand-primary">
+                                        {c.desc} <span className="text-brand-slate">({c.code})</span>
+                                      </Link>
+                                      <span className="w-24"><ShareBar share={c.share} /></span>
+                                      <span className="w-14 text-right text-brand-slate">{pct(c.share, 0)}</span>
+                                      <span className="w-32 text-right tabular-nums font-semibold"><Money n={c.cost} /></span>
+                                    </div>
+                                  ))}
+                                  <div className="flex items-center justify-between px-3 py-1.5 text-xs text-brand-slate">
+                                    <span>Neto a pagar {gs(m.net_pay)}</span>
+                                    <Link href={`${base}/colaboradores/${m.funcod}`} className="text-brand-primary hover:underline">Ver ficha completa →</Link>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {summary.multi_cc.items.length > 12 && (
+                  <button className="w-full text-xs text-brand-primary py-2 hover:underline" onClick={() => setShowAllMulti((v) => !v)}>
+                    {showAllMulti ? "Ver menos" : `Ver los ${summary.multi_cc.items.length} colaboradores compartidos`}
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       {/* Anticipos y descuentos al personal */}
