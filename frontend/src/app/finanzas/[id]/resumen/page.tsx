@@ -71,17 +71,20 @@ export default function ResumenPage() {
   const [showAllDed, setShowAllDed] = useState(false);
   // Colaboradores en varios centros: fila expandida (clic) y lista completa
   const [openMulti, setOpenMulti] = useState<Record<string, boolean>>({});
+  const [multiCenter, setMultiCenter] = useState<number | null>(null);
+  // Primeros 15 + «Ver más» en la lista de centros y en la tabla
+  const [showAllMultiCenters, setShowAllMultiCenters] = useState(false);
   const [showAllMulti, setShowAllMulti] = useState(false);
-  const multiCenters = useMemo(
-    () =>
-      (summary?.multi_cc?.by_cost_center ?? []).slice(0, 12).map((c) => ({
-        name: c.desc.replace(/^V\s*-\s*/i, "").slice(0, 28),
-        code: c.code,
-        people: c.people,
-        cost: c.cost,
-      })),
-    [summary]
-  );
+  const multiRows = useMemo(() => {
+    const items = summary?.multi_cc?.items ?? [];
+    if (multiCenter === null) return items;
+    // Filtrado por centro: quienes están compartidos en ese centro, ordenados por lo que cae ahí
+    return items
+      .filter((m) => m.centers.some((c) => c.code === multiCenter))
+      .map((m) => ({ ...m, in_cc: m.centers.find((c) => c.code === multiCenter)! }))
+      .sort((a, b) => b.in_cc.cost - a.in_cc.cost);
+  }, [summary, multiCenter]);
+  const multiMax = useMemo(() => Math.max(1, ...(summary?.multi_cc?.by_cost_center ?? []).map((c) => c.people)), [summary]);
 
   if (error) return <EmptyState title="Sin resumen" body={error} />;
   if (!summary) return <div className="card p-10 text-center text-brand-slate">Cargando…</div>;
@@ -247,103 +250,161 @@ export default function ResumenPage() {
         ) : (
           <>
             <p className="text-xs text-brand-slate mt-1 mb-2">
-              Una persona puede estar imputada a varios centros en el mismo mes. Su costo se reparte por línea
-              entre esos centros y <b>nunca se cuenta dos veces</b> en los totales de la sesión.
-              {" "}
-              {Object.entries(summary.multi_cc.by_count)
-                .sort((a, b) => Number(a[0]) - Number(b[0]))
-                .map(([n, k]) => `${k} en ${n} centros`)
-                .join(" · ")}
-              .
+              Una persona puede estar imputada a varios centros en el mismo mes. Su costo se reparte por línea entre esos
+              centros y <b>nunca se cuenta dos veces</b> en los totales de la sesión.
             </p>
             <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-4">
               <StatTile label="Colaboradores compartidos" value={int(summary.multi_cc.people)} hint={`de ${int(t.collaborators)} (${pct(t.collaborators ? summary.multi_cc.people / t.collaborators : 0)})`} />
               <StatTile label="Gasto que se reparte" value={gsCompact(summary.multi_cc.cost)} full={gs(summary.multi_cc.cost)} hint={`${pct(t.cost ? summary.multi_cc.cost / t.cost : 0)} del gasto total`} />
-              <StatTile label="Máximo de centros" value={int(summary.multi_cc.max_centers)} hint="Para una misma persona" />
               <StatTile label="Centros con compartidos" value={int(summary.multi_cc.by_cost_center.length)} hint={`de ${int(t.cost_centers)} centros`} />
+              <StatTile
+                label="Centros por persona"
+                value={`hasta ${int(summary.multi_cc.max_centers)}`}
+                hint={Object.entries(summary.multi_cc.by_count)
+                  .sort((a, b) => Number(a[0]) - Number(b[0]))
+                  .map(([n, k]) => `${k} en ${n}`)
+                  .join(" · ")}
+              />
             </div>
 
-            <div className="grid gap-4 xl:grid-cols-[2fr_3fr]">
-              <div className="card p-5">
-                <h3 className="label">Centros con más colaboradores compartidos</h3>
-                <div style={{ height: Math.max(240, multiCenters.length * 26 + 40) }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={multiCenters} layout="vertical" margin={{ left: 4, right: 40, top: 8, bottom: 4 }} barCategoryGap={4}>
-                      <CartesianGrid horizontal={false} stroke={CHART.grid} />
-                      <XAxis type="number" tick={axisStyle} axisLine={false} tickLine={false} allowDecimals={false} />
-                      <YAxis type="category" dataKey="name" width={160} tick={axisStyle} axisLine={false} tickLine={false} />
-                      <Tooltip
-                        {...tooltipStyle()}
-                        formatter={(v: any) => [int(Number(v)), "Compartidos"]}
-                        labelFormatter={(l: any, p: any) => `${l}${p?.[0]?.payload?.code ? ` (${p[0].payload.code})` : ""} · reciben ${gs(p?.[0]?.payload?.cost ?? 0)}`}
-                      />
-                      <Bar dataKey="people" fill={CHART.single} radius={[0, 4, 4, 0]} isAnimationActive={false}
-                        label={{ position: "right", fontSize: 10, fill: CHART.slate }} />
-                    </BarChart>
-                  </ResponsiveContainer>
+            <div className="grid gap-4 xl:grid-cols-[2fr_3fr] items-start">
+              {/* Lista COMPLETA de centros: clic = filtrar la tabla de la derecha */}
+              <div className="card">
+                <div className="flex items-baseline justify-between px-4 pt-4 pb-2">
+                  <h3 className="label !mb-0">Centros con colaboradores compartidos</h3>
+                  <span className="text-[11px] text-brand-slate">clic en un centro para filtrar</span>
                 </div>
+                <div className="divide-y divide-brand-border">
+                  <button
+                    className={`w-full flex items-center gap-3 px-4 py-2 text-left text-sm hover:bg-brand-bg-soft ${multiCenter === null ? "bg-brand-primary-light" : ""}`}
+                    onClick={() => setMultiCenter(null)}
+                  >
+                    <span className="flex-1 font-semibold text-brand-ink">Todos los centros</span>
+                    <span className="text-xs text-brand-slate">{int(summary.multi_cc.people)} personas</span>
+                  </button>
+                  {(showAllMultiCenters ? summary.multi_cc.by_cost_center : summary.multi_cc.by_cost_center.slice(0, 15)).map((c) => {
+                    const active = multiCenter === c.code;
+                    return (
+                      <button
+                        key={c.code}
+                        className={`w-full grid grid-cols-[minmax(0,1fr)_110px_96px] items-center gap-3 px-4 py-2 text-left text-sm hover:bg-brand-bg-soft ${active ? "bg-brand-primary-light" : ""}`}
+                        onClick={() => setMultiCenter(active ? null : c.code)}
+                        title={`${c.desc} (${c.code}) · ${int(c.people)} compartidos · reciben ${gs(c.cost)}`}
+                      >
+                        <span className="min-w-0">
+                          <span className={`block truncate ${active ? "font-semibold text-brand-primary-dark" : "text-brand-ink"}`}>{c.desc}</span>
+                          <span className="block text-[11px] text-brand-slate">{c.code}</span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="h-2 flex-1 bg-brand-bg rounded overflow-hidden" aria-hidden>
+                            <span className="block h-full rounded" style={{ width: `${(c.people / multiMax) * 100}%`, background: CHART.single }} />
+                          </span>
+                          <span className="w-6 text-right tabular-nums font-semibold text-brand-ink">{int(c.people)}</span>
+                        </span>
+                        <span className="text-right text-xs tabular-nums text-brand-slate" title="Gasto de los compartidos que cae en este centro">{gsCompact(c.cost)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {summary.multi_cc.by_cost_center.length > 15 && (
+                  <button className="w-full text-xs text-brand-primary py-2 hover:underline border-t border-brand-border" onClick={() => setShowAllMultiCenters((v) => !v)}>
+                    {showAllMultiCenters ? "Ver menos" : `Ver los ${summary.multi_cc.by_cost_center.length} centros`}
+                  </button>
+                )}
               </div>
 
-              <div className="card overflow-x-auto scrollbar-thin">
-                <table className="w-full text-sm min-w-[560px]">
-                  <thead>
-                    <tr>
-                      <th className={th}>Colaborador · clic para ver el reparto</th>
-                      <th className={th}>Tipo</th>
-                      <th className={th}>Puesto</th>
-                      <th className={thNum}>Centros</th>
-                      <th className={thNum}>Gasto total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(showAllMulti ? summary.multi_cc.items : summary.multi_cc.items.slice(0, 12)).map((m) => {
-                      const open = !!openMulti[m.funcod];
-                      return (
-                        <Fragment key={m.funcod}>
-                          <tr
-                            className="hover:bg-brand-bg-soft cursor-pointer"
-                            onClick={() => setOpenMulti((o) => ({ ...o, [m.funcod]: !open }))}
-                          >
-                            <td className={td}>
-                              <span className="text-brand-slate text-xs mr-1">{open ? "▾" : "▸"}</span>
-                              <span className="font-semibold text-brand-ink">{m.name}</span>
-                              <div className="text-[11px] text-brand-slate pl-4">Funcod {m.funcod}</div>
-                            </td>
-                            <td className={td}><CategoryBadge category={m.category} egreso={m.is_egreso} /></td>
-                            <td className={td}>{m.position ?? "—"}</td>
-                            <td className={`${tdNum} font-semibold`}>{int(m.cc_count)}</td>
-                            <td className={tdNum}><Money n={m.total_cost} /></td>
-                          </tr>
-                          {open && (
-                            <tr>
-                              <td colSpan={5} className="px-3 pb-3 pt-0 border-t-0 bg-brand-bg-soft">
-                                <div className="rounded-md border border-brand-border bg-white divide-y divide-brand-border">
-                                  {m.centers.map((c) => (
-                                    <div key={c.code} className="flex items-center gap-3 px-3 py-1.5 text-xs">
-                                      <Link href={`${base}/centros/${c.code}`} className="flex-1 text-brand-ink hover:text-brand-primary">
-                                        {c.desc} <span className="text-brand-slate">({c.code})</span>
-                                      </Link>
-                                      <span className="w-24"><ShareBar share={c.share} /></span>
-                                      <span className="w-14 text-right text-brand-slate">{pct(c.share, 0)}</span>
-                                      <span className="w-32 text-right tabular-nums font-semibold"><Money n={c.cost} /></span>
-                                    </div>
-                                  ))}
-                                  <div className="flex items-center justify-between px-3 py-1.5 text-xs text-brand-slate">
-                                    <span>Neto a pagar {gs(m.net_pay)}</span>
-                                    <Link href={`${base}/colaboradores/${m.funcod}`} className="text-brand-primary hover:underline">Ver ficha completa →</Link>
-                                  </div>
+              {/* Tabla: filtrada por el centro elegido */}
+              <div className="card">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 pb-2">
+                  <h3 className="label !mb-0">
+                    {multiCenter === null
+                      ? `Colaboradores compartidos · ${int(multiRows.length)}`
+                      : `${int(multiRows.length)} compartidos en ${summary.multi_cc.by_cost_center.find((c) => c.code === multiCenter)?.desc ?? multiCenter}`}
+                  </h3>
+                  {multiCenter !== null && (
+                    <span className="flex items-center gap-2 text-xs">
+                      <Link href={`${base}/centros/${multiCenter}`} className="text-brand-primary hover:underline">Ver el centro →</Link>
+                      <button className="btn-ghost text-xs" onClick={() => setMultiCenter(null)}>✕ Quitar filtro</button>
+                    </span>
+                  )}
+                </div>
+                <div className="overflow-x-auto scrollbar-thin">
+                  <table className="w-full text-sm min-w-[560px]">
+                    <thead>
+                      <tr>
+                        <th className={th}>Colaborador · clic para ver el reparto</th>
+                        <th className={th}>Puesto</th>
+                        <th className={thNum}>Centros</th>
+                        {multiCenter !== null && <th className={thNum}>En este centro</th>}
+                        <th className={thNum}>Gasto total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(showAllMulti ? multiRows : multiRows.slice(0, 15)).map((m) => {
+                        const open = !!openMulti[m.funcod];
+                        const inCc = (m as { in_cc?: { cost: number; share: number } }).in_cc;
+                        const cols = multiCenter !== null ? 5 : 4;
+                        return (
+                          <Fragment key={m.funcod}>
+                            <tr
+                              className="hover:bg-brand-bg-soft cursor-pointer"
+                              onClick={() => setOpenMulti((o) => ({ ...o, [m.funcod]: !open }))}
+                            >
+                              <td className={td}>
+                                <span className="text-brand-slate text-xs mr-1">{open ? "▾" : "▸"}</span>
+                                <span className="font-semibold text-brand-ink">{m.name}</span>
+                                <div className="text-[11px] text-brand-slate pl-4 flex items-center gap-2">
+                                  Funcod {m.funcod} <CategoryBadge category={m.category} egreso={m.is_egreso} />
                                 </div>
                               </td>
+                              <td className={td}>{m.position ?? "—"}</td>
+                              <td className={`${tdNum} font-semibold`}>{int(m.cc_count)}</td>
+                              {inCc && (
+                                <td className={tdNum}>
+                                  <Money n={inCc.cost} />
+                                  <div className="text-[11px] text-brand-slate">{pct(inCc.share, 0)} de su costo</div>
+                                </td>
+                              )}
+                              <td className={tdNum}><Money n={m.total_cost} /></td>
                             </tr>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {summary.multi_cc.items.length > 12 && (
-                  <button className="w-full text-xs text-brand-primary py-2 hover:underline" onClick={() => setShowAllMulti((v) => !v)}>
-                    {showAllMulti ? "Ver menos" : `Ver los ${summary.multi_cc.items.length} colaboradores compartidos`}
+                            {open && (
+                              <tr>
+                                <td colSpan={cols} className="px-3 pb-3 pt-0 border-t-0 bg-brand-bg-soft">
+                                  <div className="rounded-md border border-brand-border bg-white divide-y divide-brand-border">
+                                    {m.centers.map((c) => (
+                                      <div key={c.code} className={`flex items-center gap-3 px-3 py-1.5 text-xs ${c.code === multiCenter ? "bg-brand-primary-light" : ""}`}>
+                                        <button
+                                          className="flex-1 text-left text-brand-ink hover:text-brand-primary"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setMultiCenter(c.code);
+                                          }}
+                                          title="Filtrar por este centro"
+                                        >
+                                          {c.desc} <span className="text-brand-slate">({c.code})</span>
+                                        </button>
+                                        <span className="w-24"><ShareBar share={c.share} /></span>
+                                        <span className="w-14 text-right text-brand-slate">{pct(c.share, 0)}</span>
+                                        <span className="w-32 text-right tabular-nums font-semibold"><Money n={c.cost} /></span>
+                                      </div>
+                                    ))}
+                                    <div className="flex items-center justify-between px-3 py-1.5 text-xs text-brand-slate">
+                                      <span>Neto a pagar {gs(m.net_pay)}</span>
+                                      <Link href={`${base}/colaboradores/${m.funcod}`} className="text-brand-primary hover:underline">Ver ficha completa →</Link>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {multiRows.length > 15 && (
+                  <button className="w-full text-xs text-brand-primary py-2 hover:underline border-t border-brand-border" onClick={() => setShowAllMulti((v) => !v)}>
+                    {showAllMulti ? "Ver menos" : `Ver los ${int(multiRows.length)} colaboradores`}
                   </button>
                 )}
               </div>
