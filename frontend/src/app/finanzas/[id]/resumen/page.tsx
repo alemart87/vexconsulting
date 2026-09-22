@@ -54,6 +54,20 @@ export default function ResumenPage() {
     () => (summary?.concepts ?? []).filter((c) => c.cost > 0).map((c) => ({ name: c.label, cost: c.cost, share: c.share })),
     [summary]
   );
+  // Anticipos y descuentos por centro: 3 series fijas (anticipos, promocionales, otros = varios + embargos)
+  const dedCenters = useMemo(
+    () =>
+      (summary?.deductions?.by_cost_center ?? []).slice(0, 15).map((c) => ({
+        name: c.desc.replace(/^V\s*-\s*/i, "").slice(0, 28),
+        code: c.code,
+        anticipo: c.anticipo,
+        promocional: c.descuento_promocional,
+        otros: c.descuento_varios + c.embargo,
+        total: c.total,
+      })),
+    [summary]
+  );
+  const [showAllDed, setShowAllDed] = useState(false);
 
   if (error) return <EmptyState title="Sin resumen" body={error} />;
   if (!summary) return <div className="card p-10 text-center text-brand-slate">Cargando…</div>;
@@ -200,6 +214,105 @@ export default function ResumenPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* Anticipos y descuentos al personal */}
+      <section>
+        <div className="flex items-baseline justify-between">
+          <h2 className="label !mb-0">Anticipos y descuentos al personal (no salariales)</h2>
+          {summary.deductions && (
+            <span className="text-[11px] text-brand-slate">
+              Retenidos del neto a pagar · {int(summary.deductions.people)} colaboradores · {pct(summary.deductions.share_of_net_pay)} del neto total
+            </span>
+          )}
+        </div>
+        {!summary.deductions ? (
+          <div className="card p-5 mt-2 text-sm text-brand-slate">
+            Esta sesión se ejecutó con una versión anterior: volvé a presionar «Ejecutar VeXFinanzas» para ver anticipos y descuentos.
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mt-2">
+              {summary.deductions.by_concept.map((d) => (
+                <StatTile
+                  key={d.concept}
+                  label={d.label}
+                  value={gsCompact(d.amount)}
+                  full={gs(d.amount)}
+                  hint={`${int(d.people)} colaboradores · prom. ${gsCompact(d.avg)} · máx. ${gsCompact(d.max)}`}
+                  accent={d.concept === "anticipo" ? CHART.mensualero : d.concept === "descuento_promocional" ? CHART.jornalero : CHART.third}
+                />
+              ))}
+              <StatTile
+                label="Total descontado"
+                value={gsCompact(summary.deductions.total)}
+                full={gs(summary.deductions.total)}
+                hint={`${pct(summary.deductions.share_of_net_pay)} del neto a pagar · ${summary.deductions.by_file.map((f) => `${f.label} ${gsCompact(f.amount)}`).join(" · ")}`}
+              />
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2 mt-4">
+              <div className="card p-5">
+                <h3 className="label">Anticipos y descuentos por centro de costo · top 15</h3>
+                <div style={{ height: Math.max(300, dedCenters.length * 24 + 40) }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dedCenters} layout="vertical" margin={{ left: 4, right: 48, top: 8, bottom: 4 }} barCategoryGap={4}>
+                      <CartesianGrid horizontal={false} stroke={CHART.grid} />
+                      <XAxis type="number" tickFormatter={(v) => gsCompact(v).replace("Gs. ", "")} tick={axisStyle} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={170} tick={axisStyle} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        {...tooltipStyle()}
+                        formatter={(v: any, n: any) => [gs(Number(v)), n === "anticipo" ? "Anticipos" : n === "promocional" ? "Desc. promocionales" : "Desc. varios + embargos"]}
+                        labelFormatter={(l: any, p: any) => `${l}${p?.[0]?.payload?.code ? ` (${p[0].payload.code})` : ""} · total ${gs(p?.[0]?.payload?.total ?? 0)}`}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} formatter={(v) => (v === "anticipo" ? "Anticipos" : v === "promocional" ? "Desc. promocionales" : "Desc. varios + embargos")} />
+                      <Bar dataKey="anticipo" stackId="d" fill={CHART.mensualero} isAnimationActive={false} stroke="#fff" strokeWidth={1} />
+                      <Bar dataKey="promocional" stackId="d" fill={CHART.jornalero} isAnimationActive={false} stroke="#fff" strokeWidth={1} />
+                      <Bar dataKey="otros" stackId="d" fill={CHART.third} radius={[0, 4, 4, 0]} isAnimationActive={false} stroke="#fff" strokeWidth={1} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="card overflow-x-auto scrollbar-thin">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead>
+                    <tr>
+                      <th className={th}>Centro de costo</th>
+                      <th className={thNum} title="Colaboradores con algún descuento / total del centro">Con desc.</th>
+                      <th className={thNum}>Anticipos</th>
+                      <th className={thNum}>Promoc.</th>
+                      <th className={thNum}>Varios + emb.</th>
+                      <th className={thNum}>Total</th>
+                      <th className={thNum}>% del neto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(showAllDed ? summary.deductions.by_cost_center : summary.deductions.by_cost_center.slice(0, 15)).map((c) => (
+                      <tr key={c.code} className="hover:bg-brand-bg-soft">
+                        <td className={td}>
+                          <Link href={`${base}/centros/${c.code}`} className="text-brand-ink hover:text-brand-primary">{c.desc}</Link>
+                          <div className="text-[11px] text-brand-slate">{c.code}</div>
+                        </td>
+                        <td className={tdNum}>{int(c.deduction_people)} / {int(c.people)}</td>
+                        <td className={tdNum}>{c.anticipo ? <Money n={c.anticipo} compact /> : <span className="text-brand-mist">—</span>}</td>
+                        <td className={tdNum}>{c.descuento_promocional ? <Money n={c.descuento_promocional} compact /> : <span className="text-brand-mist">—</span>}</td>
+                        <td className={tdNum}>{c.descuento_varios + c.embargo ? <Money n={c.descuento_varios + c.embargo} compact /> : <span className="text-brand-mist">—</span>}</td>
+                        <td className={`${tdNum} font-semibold`}><Money n={c.total} compact /></td>
+                        <td className={tdNum}>{pct(c.share_of_net_pay)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {summary.deductions.by_cost_center.length > 15 && (
+                  <button className="w-full text-xs text-brand-primary py-2 hover:underline" onClick={() => setShowAllDed((v) => !v)}>
+                    {showAllDed ? "Ver menos" : `Ver los ${summary.deductions.by_cost_center.length} centros con descuentos`}
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       {/* Clientes */}

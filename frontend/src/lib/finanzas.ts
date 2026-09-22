@@ -84,6 +84,23 @@ export interface FinCostCenter {
   share: number;
   avg_cost: number;
   concepts: Record<string, number>;
+  net_pay?: number;
+  deductions?: Record<string, number>;
+  deductions_total?: number;
+  deduction_people?: number;
+}
+
+export interface FinDeductions {
+  total: number;
+  people: number;
+  share_of_net_pay: number;
+  by_concept: { concept: string; label: string; amount: number; rows: number; people: number; avg: number; max: number }[];
+  by_cost_center: {
+    code: number; desc: string; client: string; people: number; deduction_people: number; total: number;
+    net_pay: number; share_of_net_pay: number; anticipo: number; descuento_promocional: number;
+    descuento_varios: number; embargo: number;
+  }[];
+  by_file: { file_id: string; label: string; amount: number; people: number }[];
 }
 
 export interface FinAccount {
@@ -125,6 +142,8 @@ export interface FinSummary {
     diff: number; dirty_funcods: number;
   }[];
   warnings: FinWarning[];
+  /** Ausente en sesiones ejecutadas antes de esta versión: volver a ejecutar. */
+  deductions?: FinDeductions;
 }
 
 export interface FinCollaborator {
