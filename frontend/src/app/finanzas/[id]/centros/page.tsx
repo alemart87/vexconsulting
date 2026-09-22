@@ -4,19 +4,36 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { EmptyState, FilterBar, Money, ShareBar, TableWrap, td, tdNum, th, thNum } from "@/components/finanzas/ui";
-import { apiFetch } from "@/lib/api";
+import { useFinanceSession } from "@/components/finanzas/FinanceSessionContext";
+import { apiFetch, downloadFile } from "@/lib/api";
 import { CHART, int, pct, type FinCostCenter } from "@/lib/finanzas";
 
 type SortKey = "cost" | "people" | "desc" | "avg_cost" | "client";
 
 export default function CostCentersPage() {
   const params = useParams<{ id: string }>();
+  const { session } = useFinanceSession();
   const [centers, setCenters] = useState<FinCostCenter[] | null>(null);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [client, setClient] = useState("");
   const [sort, setSort] = useState<SortKey>("cost");
   const [desc, setDesc] = useState(true);
+  const [downloading, setDownloading] = useState<number | null>(null);
+
+  const download = async (c: FinCostCenter) => {
+    setDownloading(c.code);
+    try {
+      await downloadFile(
+        `/api/v1/finanzas/sessions/${params.id}/cost-centers/${c.code}/export`,
+        `${c.code}_${c.desc.replace(/[^\w-]+/g, "-")}.xlsx`
+      );
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   useEffect(() => {
     apiFetch<FinCostCenter[]>(`/api/v1/finanzas/sessions/${params.id}/cost-centers`)
@@ -75,8 +92,12 @@ export default function CostCentersPage() {
             ))}
           </select>
         </div>
-        <div className="text-xs text-brand-slate pb-2.5">
-          {rows.length} centros · {int(sumPeople)} colaboradores · <Money n={sumCost} compact />
+        <div className="text-xs text-brand-slate pb-2.5" title="Una persona imputada a varios centros cuenta en cada uno: por eso las asignaciones superan a los colaboradores únicos">
+          {rows.length} centros · {int(sumPeople)} asignaciones
+          {!q && !client && session?.totals
+            ? ` (${int(session.totals.collaborators)} colaboradores únicos, ${int(session.totals.multi_cc_people)} en más de un centro)`
+            : ""}
+          {" "}· <Money n={sumCost} compact />
         </div>
       </FilterBar>
 
@@ -85,7 +106,7 @@ export default function CostCentersPage() {
           <tr>
             <th className={`${th} cursor-pointer`} onClick={() => toggleSort("desc")}>Centro de costo{arrow("desc")}</th>
             <th className={`${th} cursor-pointer`} onClick={() => toggleSort("client")}>Cliente{arrow("client")}</th>
-            <th className={`${thNum} cursor-pointer`} onClick={() => toggleSort("people")}>Personas{arrow("people")}</th>
+            <th className={`${thNum} cursor-pointer`} onClick={() => toggleSort("people")} title="Personas imputadas al centro (una persona puede estar en varios)">Personas{arrow("people")}</th>
             <th className={thNum}>
               <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm" style={{ background: CHART.mensualero }} />Mens.</span>
             </th>
@@ -96,6 +117,7 @@ export default function CostCentersPage() {
             <th className={`${thNum} cursor-pointer`} onClick={() => toggleSort("cost")}>Gasto{arrow("cost")}</th>
             <th className={`${thNum} cursor-pointer`} onClick={() => toggleSort("avg_cost")}>Prom./persona{arrow("avg_cost")}</th>
             <th className={`${th} w-32`}>Particip.</th>
+            <th className={th} />
           </tr>
         </thead>
         <tbody>
@@ -122,6 +144,16 @@ export default function CostCentersPage() {
               <td className={`${td} align-middle`}>
                 <div className="text-[11px] text-brand-slate mb-1">{pct(c.share)}</div>
                 <ShareBar share={c.share} />
+              </td>
+              <td className={`${td} align-middle`}>
+                <button
+                  className="btn-ghost text-xs whitespace-nowrap"
+                  onClick={() => download(c)}
+                  disabled={downloading === c.code}
+                  title="Descargar Excel con el detalle completo del centro"
+                >
+                  {downloading === c.code ? "…" : "⬇ Excel"}
+                </button>
               </td>
             </tr>
           ))}

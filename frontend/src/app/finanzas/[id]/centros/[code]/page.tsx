@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AccountTypeBadge, BackLink, CategoryBadge, EmptyState, Money, StatTile, TableWrap, td, tdNum, th, thNum } from "@/components/finanzas/ui";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadFile } from "@/lib/api";
 import { gs, gsCompact, int, type FinCollaborator, type FinCostCenter } from "@/lib/finanzas";
 
 interface Person extends FinCollaborator {
@@ -25,6 +25,22 @@ export default function CostCenterDetailPage() {
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<"personas" | "cuentas">("personas");
+  const [downloading, setDownloading] = useState(false);
+  const [dlError, setDlError] = useState("");
+
+  const download = async () => {
+    if (!data) return;
+    setDownloading(true);
+    setDlError("");
+    try {
+      const name = `${data.center.code}_${data.center.desc.replace(/[^\w-]+/g, "-")}.xlsx`;
+      await downloadFile(`/api/v1/finanzas/sessions/${params.id}/cost-centers/${params.code}/export`, name);
+    } catch (e: any) {
+      setDlError(e.message);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   useEffect(() => {
     apiFetch<Detail>(`/api/v1/finanzas/sessions/${params.id}/cost-centers/${params.code}`)
@@ -49,10 +65,16 @@ export default function CostCenterDetailPage() {
           </div>
           <h1 className="font-display text-2xl uppercase text-brand-ink leading-tight">{c.desc}</h1>
         </div>
-        <Link href={`${base}/notas?ref_type=centro&ref_id=${c.code}&ref_label=${encodeURIComponent(c.desc)}`} className="btn-secondary !py-2 text-xs">
-          + Nota sobre este centro
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="btn-primary !py-2 text-xs" onClick={download} disabled={downloading} title="Excel con resumen, colaboradores y todos los movimientos del centro">
+            {downloading ? "Generando…" : "⬇ Descargar Excel"}
+          </button>
+          <Link href={`${base}/notas?ref_type=centro&ref_id=${c.code}&ref_label=${encodeURIComponent(c.desc)}`} className="btn-secondary !py-2 text-xs">
+            + Nota sobre este centro
+          </Link>
+        </div>
       </div>
+      {dlError && <div className="mb-3 rounded-md bg-brand-primary-light text-brand-primary-dark text-sm px-3 py-2">{dlError}</div>}
 
       <div className="grid gap-3 grid-cols-2 md:grid-cols-6 mb-4">
         <StatTile label="Gasto del mes" value={gsCompact(c.cost)} full={gs(c.cost)} hint={`${(c.share * 100).toFixed(1).replace(".", ",")} % del total`} />

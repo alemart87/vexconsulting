@@ -6,7 +6,7 @@ import { useParams, usePathname, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { FinanceSessionContext } from "@/components/finanzas/FinanceSessionContext";
 import { StatusBadge } from "@/components/finanzas/ui";
-import { apiFetch, formatDate, getUser } from "@/lib/api";
+import { apiFetch, downloadFile, formatDate, getUser } from "@/lib/api";
 import type { FinSession } from "@/lib/finanzas";
 
 const TABS = [
@@ -30,6 +30,19 @@ export default function FinanceSessionLayout({ children }: { children: React.Rea
   const [name, setName] = useState("");
   const [period, setPeriod] = useState("");
   const [busy, setBusy] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  const downloadSession = async () => {
+    if (!session) return;
+    setDownloading(true);
+    try {
+      await downloadFile(`/api/v1/finanzas/sessions/${params.id}/export`, `${session.period || "sesion"}_${session.name.replace(/[^\w-]+/g, "-")}.xlsx`);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const reload = useCallback(() => {
     apiFetch<FinSession>(`/api/v1/finanzas/sessions/${params.id}`)
@@ -157,9 +170,16 @@ export default function FinanceSessionLayout({ children }: { children: React.Rea
               </div>
             </div>
             {session && (
-              <button className="btn-ghost text-xs text-brand-primary" onClick={remove} disabled={busy}>
-                🗑 Eliminar sesión
-              </button>
+              <div className="flex items-center gap-1">
+                {session.status === "done" && (
+                  <button className="btn-secondary !py-2 text-xs" onClick={downloadSession} disabled={downloading} title="Excel con resumen, colaboradores y todos los movimientos de la sesión">
+                    {downloading ? "Generando…" : "⬇ Descargar sesión"}
+                  </button>
+                )}
+                <button className="btn-ghost text-xs text-brand-primary" onClick={remove} disabled={busy}>
+                  🗑 Eliminar sesión
+                </button>
+              </div>
             )}
           </div>
           {error && (

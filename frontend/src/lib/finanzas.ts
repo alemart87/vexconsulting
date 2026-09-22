@@ -142,8 +142,30 @@ export interface FinSummary {
     diff: number; dirty_funcods: number;
   }[];
   warnings: FinWarning[];
-  /** Ausente en sesiones ejecutadas antes de esta versión: volver a ejecutar. */
+  /** Ausentes en sesiones ejecutadas antes de esta versión: volver a ejecutar. */
   deductions?: FinDeductions;
+  multi_cc?: FinMultiCc;
+}
+
+export interface FinMultiCcItem {
+  funcod: string;
+  name: string;
+  category: string;
+  position?: string | null;
+  is_egreso: boolean;
+  cc_count: number;
+  total_cost: number;
+  net_pay: number;
+  centers: { code: number; desc: string; cost: number; share: number }[];
+}
+
+export interface FinMultiCc {
+  people: number;
+  cost: number;
+  max_centers: number;
+  by_count: Record<string, number>;
+  by_cost_center: { code: number; desc: string; people: number; cost: number }[];
+  items: FinMultiCcItem[];
 }
 
 export interface FinCollaborator {

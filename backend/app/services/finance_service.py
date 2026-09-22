@@ -790,6 +790,44 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
         })
     multi_cc = sum(1 for c in collaborators if c["cc_count"] > 1)
 
+    # --- Colaboradores imputados a más de un centro de costo -----------------
+    # Una persona puede estar asignada a 2+ centros en el mismo mes: su costo se
+    # prorratea por línea y NUNCA se cuenta dos veces en los totales. Acá se
+    # listan con el reparto por centro para la vista gerencial.
+    cc_desc_of = {cc["code"]: cc["desc"] for cc in cost_centers}
+    multi_items = []
+    multi_by_cc: dict[int, dict] = {}
+    for funcod, c in by_funcod.items():
+        if len(c["ccs"]) < 2:
+            continue
+        col = collab_index[funcod]
+        centers = sorted(
+            [{"code": code, "desc": cc_desc_of.get(code, c["cc_desc"].get(code, str(code))), "cost": amt}
+             for code, amt in c["ccs"].items()],
+            key=lambda x: -x["cost"],
+        )
+        total = col["total_cost"]
+        for ce in centers:
+            ce["share"] = (ce["cost"] / total) if total else 0
+            m = multi_by_cc.setdefault(ce["code"], {"code": ce["code"], "desc": ce["desc"], "people": 0, "cost": 0})
+            m["people"] += 1
+            m["cost"] += ce["cost"]
+        multi_items.append({
+            "funcod": funcod, "name": col["name"], "category": col["category"],
+            "position": col["position"], "is_egreso": col["is_egreso"],
+            "cc_count": len(centers), "total_cost": total, "net_pay": col["net_pay"],
+            "centers": centers,
+        })
+    multi_items.sort(key=lambda x: (-x["cc_count"], -x["total_cost"]))
+    multi_cc_section = {
+        "people": len(multi_items),
+        "cost": sum(x["total_cost"] for x in multi_items),
+        "max_centers": max((x["cc_count"] for x in multi_items), default=0),
+        "by_count": dict(Counter(x["cc_count"] for x in multi_items)),
+        "by_cost_center": sorted(multi_by_cc.values(), key=lambda x: -x["people"]),
+        "items": multi_items,
+    }
+
     liabilities_total = sum(c["total_liabilities"] for c in collaborators)
     deductions_total = sum(c["total_deductions"] for c in collaborators)
     net_pay_total = sum(c["net_pay"] for c in collaborators)
@@ -878,6 +916,7 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
         "accounts": accounts,
         "files": files_out,
         "deductions": deductions,
+        "multi_cc": multi_cc_section,
         "warnings": warnings,
     }
     return entries, collaborators, summary
