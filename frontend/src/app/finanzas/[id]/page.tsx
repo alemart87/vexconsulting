@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useFinanceSession } from "@/components/finanzas/FinanceSessionContext";
 import { Money, TableWrap, td, tdNum, th, thNum } from "@/components/finanzas/ui";
 import { apiFetch, formatDate } from "@/lib/api";
-import { KIND_LABEL, int } from "@/lib/finanzas";
+import { KIND_LABEL, balanceStatus, int } from "@/lib/finanzas";
 
 export default function FilesPage() {
   const params = useParams<{ id: string }>();
@@ -135,7 +135,7 @@ export default function FilesPage() {
                 <th className={thNum}>Filas</th>
                 <th className={thNum}>Colab.</th>
                 <th className={thNum}>Debe</th>
-                <th className={thNum}>Dif.</th>
+                <th className={thNum}>Balance</th>
                 <th className={th} />
               </tr>
             </thead>
@@ -161,10 +161,15 @@ export default function FilesPage() {
                   <td className={tdNum}>
                     <Money n={f.total_debit} compact />
                   </td>
-                  <td className={tdNum}>
-                    <span className={f.balance_diff === 0 ? "text-emerald-700" : "text-[#8A5200]"}>
-                      {f.balance_diff === 0 ? "cuadra" : int(f.balance_diff)}
-                    </span>
+                  <td className={`${td} text-right`}>
+                    {(() => {
+                      const b = balanceStatus(f.balance_diff);
+                      return (
+                        <span className={`text-xs font-semibold ${b.ok ? "text-emerald-700" : "text-[#8A5200]"}`}>
+                          {b.label}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className={td}>
                     <button

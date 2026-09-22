@@ -217,6 +217,16 @@ export function pct(share: number | null | undefined, digits = 1): string {
   return `${(share * 100).toLocaleString("es-PY", { maximumFractionDigits: digits, minimumFractionDigits: digits })} %`;
 }
 
+/** Diferencia debe − haber tolerada como redondeo (Gs.), igual que en el backend. */
+export const BALANCE_TOLERANCE = 1000;
+
+/** Etiqueta y estado de la diferencia de un asiento: verde si cuadra (con o sin redondeo). */
+export function balanceStatus(diff: number): { ok: boolean; label: string } {
+  if (diff === 0) return { ok: true, label: "Cuadra" };
+  if (Math.abs(diff) < BALANCE_TOLERANCE) return { ok: true, label: `Cuadra con diferencia de ${int(diff)} Gs.` };
+  return { ok: false, label: `No cuadra: diferencia de ${int(diff)} Gs.` };
+}
+
 export const CATEGORY_LABEL: Record<string, string> = {
   mensualero: "Mensualero",
   jornalero: "Jornalero",

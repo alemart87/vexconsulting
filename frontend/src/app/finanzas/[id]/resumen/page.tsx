@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import { EmptyState, Money, ShareBar, StatTile, TableWrap, td, tdNum, th, thNum } from "@/components/finanzas/ui";
 import { apiFetch } from "@/lib/api";
-import { CHART, KIND_LABEL, gs, gsCompact, int, pct, type FinSummary } from "@/lib/finanzas";
+import { CHART, KIND_LABEL, balanceStatus, gs, gsCompact, int, pct, type FinSummary } from "@/lib/finanzas";
 
 const axisStyle = { fontSize: 11, fill: CHART.slate };
 
@@ -75,7 +75,7 @@ export default function ResumenPage() {
           <StatTile label="Neto a pagar" value={gsCompact(t.net_pay)} full={gs(t.net_pay)} hint="Sueldos y jornales a pagar" />
           <StatTile label="IPS a pagar" value={gsCompact(t.ips)} full={gs(t.ips)} hint="Aporte patronal + obrero" />
           <StatTile label="Costo promedio" value={gsCompact(t.avg_cost_per_person)} full={gs(t.avg_cost_per_person)} hint="Por colaborador" />
-          <StatTile label="Archivos cruzados" value={int(t.files)} hint={t.balance_diff === 0 ? "Todos cuadran" : `Dif. total ${int(t.balance_diff)} Gs.`} />
+          <StatTile label="Archivos cruzados" value={int(t.files)} hint={summary.files.every((f) => balanceStatus(f.diff).ok) ? (t.balance_diff === 0 ? "Todos cuadran" : `Todos cuadran (redondeo ${int(t.balance_diff)} Gs.)`) : `${summary.files.filter((f) => !balanceStatus(f.diff).ok).length} sin cuadrar`} />
         </div>
       </section>
 
@@ -250,7 +250,7 @@ export default function ResumenPage() {
                 <th className={thNum}>Filas</th>
                 <th className={thNum}>Colab.</th>
                 <th className={thNum}>Debe</th>
-                <th className={thNum}>Dif.</th>
+                <th className={thNum}>Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -263,7 +263,12 @@ export default function ResumenPage() {
                   <td className={tdNum}>{int(f.rows)}</td>
                   <td className={tdNum}>{int(f.people)}</td>
                   <td className={tdNum}><Money n={f.debit} compact /></td>
-                  <td className={tdNum}>{f.diff === 0 ? <span className="text-emerald-700">cuadra</span> : <span className="text-[#8A5200]">{int(f.diff)}</span>}</td>
+                  <td className={`${td} text-right`}>
+                    {(() => {
+                      const b = balanceStatus(f.diff);
+                      return <span className={`text-xs font-semibold ${b.ok ? "text-emerald-700" : "text-[#8A5200]"}`}>{b.label}</span>;
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>
