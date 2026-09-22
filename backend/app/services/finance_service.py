@@ -74,6 +74,10 @@ CONCEPT_LABELS: dict[str, str] = {
     "otro": "Otros",
 }
 
+# Conceptos que NO son salario: retenciones que se descuentan del neto del colaborador
+# (anticipos de sueldo, descuentos promocionales/varios y embargos judiciales).
+DEDUCTION_CONCEPTS = ("anticipo", "descuento_promocional", "descuento_varios", "embargo")
+
 CATEGORY_LABELS = {
     "mensualero": "Mensualeros",
     "jornalero": "Jornaleros (operadores)",
@@ -551,6 +555,8 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
                 c["total_liabilities"] += amount
                 if r["concept"] == "neto_a_pagar":
                     c["net_pay"] += amount
+                if r["concept"] == "embargo":
+                    c["total_deductions"] += amount
             elif r["account_type"] == "activo":
                 c["total_deductions"] += r["credit"] - r["debit"]
             if f.kind == "egresos":
@@ -594,7 +600,8 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
         if a is None:
             a = cc_agg[e["cc_code"]] = {
                 "code": e["cc_code"], "people": set(), "rows": 0, "cost": 0,
-                "concepts": defaultdict(int), "files": set(),
+                "concepts": defaultdict(int), "files": set(), "net_pay": 0,
+                "deductions": defaultdict(int), "deduction_people": defaultdict(set),
             }
         a["rows"] += 1
         a["people"].add(e["funcod"])
@@ -603,6 +610,11 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
             amt = e["debit"] - e["credit"]
             a["cost"] += amt
             a["concepts"][e["concept"]] += amt
+        elif e["concept"] == "neto_a_pagar":
+            a["net_pay"] += e["credit"] - e["debit"]
+        elif e["concept"] in DEDUCTION_CONCEPTS:
+            a["deductions"][e["concept"]] += e["credit"] - e["debit"]
+            a["deduction_people"][e["concept"]].add(e["funcod"])
 
     gasto_total = sum(a["cost"] for a in cc_agg.values())
     cost_centers: list[dict] = []
@@ -628,6 +640,10 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
             "share": (a["cost"] / gasto_total) if gasto_total else 0,
             "avg_cost": int(a["cost"] / len(people)) if people else 0,
             "concepts": dict(a["concepts"]),
+            "net_pay": a["net_pay"],
+            "deductions": dict(a["deductions"]),
+            "deductions_total": sum(a["deductions"].values()),
+            "deduction_people": len(set().union(*a["deduction_people"].values())) if a["deduction_people"] else 0,
         })
     cost_centers.sort(key=lambda x: -x["cost"])
 
@@ -780,6 +796,60 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
     ips_total = sum(a["net"] for a in accounts if a["concept"] == "ips_a_pagar")
     aguinaldo_liab = sum(a["net"] for a in accounts if a["concept"] == "aguinaldo_a_pagar")
 
+    # --- Anticipos y descuentos al personal (no salariales) ------------------
+    ded_by_concept: dict[str, dict] = {}
+    ded_people_all: set[str] = set()
+    ded_by_file: dict[str, dict] = {}
+    for e in entries:
+        if e["concept"] not in DEDUCTION_CONCEPTS:
+            continue
+        amt = e["credit"] - e["debit"]
+        d = ded_by_concept.setdefault(e["concept"], {"concept": e["concept"], "label": CONCEPT_LABELS.get(e["concept"], e["concept"]),
+                                                     "amount": 0, "rows": 0, "people": set(), "max": 0})
+        d["amount"] += amt
+        d["rows"] += 1
+        d["people"].add(e["funcod"])
+        d["max"] = max(d["max"], amt)
+        ded_people_all.add(e["funcod"])
+        fl = ded_by_file.setdefault(e["file_id"], {"file_id": e["file_id"], "amount": 0, "people": set()})
+        fl["amount"] += amt
+        fl["people"].add(e["funcod"])
+    file_label = {f.id: f.label for f in files}
+    ded_concepts = []
+    for key in DEDUCTION_CONCEPTS:
+        d = ded_by_concept.get(key)
+        if not d:
+            continue
+        ded_concepts.append({
+            "concept": key, "label": d["label"], "amount": d["amount"], "rows": d["rows"],
+            "people": len(d["people"]), "avg": int(d["amount"] / len(d["people"])) if d["people"] else 0,
+            "max": d["max"],
+        })
+    ded_total = sum(d["amount"] for d in ded_concepts)
+    ded_centers = [
+        {
+            "code": cc["code"], "desc": cc["desc"], "client": cc["client"], "people": cc["people"],
+            "deduction_people": cc["deduction_people"], "total": cc["deductions_total"],
+            "net_pay": cc["net_pay"],
+            "share_of_net_pay": (cc["deductions_total"] / cc["net_pay"]) if cc["net_pay"] else 0,
+            **{k: cc["deductions"].get(k, 0) for k in DEDUCTION_CONCEPTS},
+        }
+        for cc in cost_centers if cc["deductions_total"]
+    ]
+    ded_centers.sort(key=lambda x: -x["total"])
+    deductions = {
+        "total": ded_total,
+        "people": len(ded_people_all),
+        "share_of_net_pay": (ded_total / net_pay_total) if net_pay_total else 0,
+        "by_concept": ded_concepts,
+        "by_cost_center": ded_centers,
+        "by_file": sorted(
+            [{"file_id": k, "label": file_label.get(k, "?"), "amount": v["amount"], "people": len(v["people"])}
+             for k, v in ded_by_file.items()],
+            key=lambda x: -x["amount"],
+        ),
+    }
+
     summary = {
         "period": period,
         "period_label": period_label(period),
@@ -807,6 +877,7 @@ def build_analysis(files: list[FileInput], period: str | None) -> tuple[list[dic
         "clients": clients,
         "accounts": accounts,
         "files": files_out,
+        "deductions": deductions,
         "warnings": warnings,
     }
     return entries, collaborators, summary
