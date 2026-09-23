@@ -142,7 +142,7 @@ export default function ResumenPage() {
                   <div className="text-[11px] uppercase tracking-wider2 text-brand-slate font-semibold">{c.label}</div>
                   <div className="text-[11px] text-brand-slate">{pct(c.share)} del gasto</div>
                 </div>
-                <div className="flex items-end justify-between mt-1">
+                <div className="flex items-end justify-between mt-1 pr-10">
                   <div className="font-display text-3xl text-brand-ink leading-none">{int(c.people)}</div>
                   <div className="text-right">
                     <div className="font-semibold text-brand-ink tabular-nums" title={gs(c.cost)}>{gsCompact(c.cost)}</div>

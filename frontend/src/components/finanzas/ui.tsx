@@ -9,7 +9,9 @@ import { CATEGORY_LABEL, STATUS_LABEL, gs, gsCompact } from "@/lib/finanzas";
 export function DownloadButton({
   onClick,
   title = "Descargar Excel",
-  className = "",
+  // Posición: «relative» en flujo, o «absolute top-3 right-3» en una esquina.
+  // (No se fija acá para que la clase pasada no compita con ella en el CSS.)
+  className = "relative",
 }: {
   onClick: () => Promise<void> | void;
   title?: string;
@@ -31,7 +33,7 @@ export function DownloadButton({
           setBusy(false);
         }
       }}
-      className={`group relative h-8 w-8 rounded-full bg-brand-primary text-white shadow-soft flex items-center justify-center transition-transform hover:scale-110 hover:bg-brand-primary-dark disabled:opacity-60 ${className}`}
+      className={`group h-8 w-8 rounded-full bg-brand-primary text-white shadow-soft flex items-center justify-center transition-transform hover:scale-110 hover:bg-brand-primary-dark disabled:opacity-60 ${className}`}
     >
       {/* Halo que respira para atraer la mirada; se apaga al pasar el mouse */}
       <span className="absolute inset-0 rounded-full ring-2 ring-brand-primary/40 animate-ping group-hover:hidden" aria-hidden style={{ animationDuration: "2.4s" }} />
