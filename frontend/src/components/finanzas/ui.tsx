@@ -36,9 +36,8 @@ export function DownloadButton({
             setBusy(false);
           }
         }}
-        className={`group h-8 pl-2.5 pr-3 rounded-full bg-brand-primary text-white text-xs font-semibold shadow-soft inline-flex items-center gap-1.5 whitespace-nowrap transition-transform hover:scale-105 hover:bg-brand-primary-dark disabled:opacity-60 ${className}`}
+        className={`group h-8 pl-2.5 pr-3 rounded-full bg-brand-primary text-white text-xs font-semibold shadow-elevated ring-2 ring-brand-primary/25 inline-flex items-center gap-1.5 whitespace-nowrap transition-transform hover:scale-105 hover:bg-brand-primary-dark disabled:opacity-60 ${className}`}
       >
-        <span className="absolute inset-0 rounded-full ring-2 ring-brand-primary/40 animate-ping group-hover:hidden" aria-hidden style={{ animationDuration: "2.4s" }} />
         {busy ? (
           <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden />
         ) : (
