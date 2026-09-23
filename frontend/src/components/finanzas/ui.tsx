@@ -1,7 +1,52 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { CATEGORY_LABEL, STATUS_LABEL, gs, gsCompact } from "@/lib/finanzas";
+
+/** Botón circular de descarga (rojo corporativo, con halo animado) para las
+ *  esquinas de las tarjetas: llama la atención sin tapar el contenido. */
+export function DownloadButton({
+  onClick,
+  title = "Descargar Excel",
+  className = "",
+}: {
+  onClick: () => Promise<void> | void;
+  title?: string;
+  className?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={title}
+      title={title}
+      disabled={busy}
+      onClick={async (e) => {
+        e.stopPropagation();
+        setBusy(true);
+        try {
+          await onClick();
+        } finally {
+          setBusy(false);
+        }
+      }}
+      className={`group relative h-8 w-8 rounded-full bg-brand-primary text-white shadow-soft flex items-center justify-center transition-transform hover:scale-110 hover:bg-brand-primary-dark disabled:opacity-60 ${className}`}
+    >
+      {/* Halo que respira para atraer la mirada; se apaga al pasar el mouse */}
+      <span className="absolute inset-0 rounded-full ring-2 ring-brand-primary/40 animate-ping group-hover:hidden" aria-hidden style={{ animationDuration: "2.4s" }} />
+      {busy ? (
+        <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden />
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M4 19h16" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 /** Tarjeta de indicador: número grande + etiqueta + pista opcional. */
 export function StatTile({
@@ -10,6 +55,8 @@ export function StatTile({
   hint,
   accent,
   full,
+  onDownload,
+  downloadTitle,
 }: {
   label: string;
   value: string;
@@ -17,10 +64,16 @@ export function StatTile({
   accent?: string;
   /** Mostrar el valor completo en el title (para montos compactados). */
   full?: string;
+  /** Botón de descarga en la esquina superior derecha. */
+  onDownload?: () => Promise<void> | void;
+  downloadTitle?: string;
 }) {
   return (
-    <div className="card p-4 min-w-0">
-      <div className="text-[10px] uppercase tracking-wider2 text-brand-slate font-semibold leading-snug">
+    <div className="card p-4 min-w-0 relative">
+      {onDownload && (
+        <DownloadButton onClick={onDownload} title={downloadTitle} className="absolute top-3 right-3" />
+      )}
+      <div className={`text-[10px] uppercase tracking-wider2 text-brand-slate font-semibold leading-snug ${onDownload ? "pr-9" : ""}`}>
         {label}
       </div>
       <div

@@ -61,7 +61,10 @@ def build_workbook(
     accounts: Iterable[dict],
     collaborators: Iterable[dict],
     entries: Iterable,
+    extra_cols: list[tuple[str, str]] | None = None,
 ) -> bytes:
+    """`extra_cols`: columnas adicionales de la hoja Colaboradores como
+    (encabezado, clave del dict), p. ej. («Gasto en este centro», «cost_in_cc»)."""
     from openpyxl import Workbook
 
     wb = Workbook(write_only=True)
@@ -78,8 +81,9 @@ def build_workbook(
         ws.append([a["code"], a["desc"], a["type"], a.get("concept_label") or a.get("concept"),
                    a["rows"], a["people"], a["debit"], a["credit"], a["net"]])
 
+    extra_cols = extra_cols or []
     ws = wb.create_sheet("Colaboradores")
-    _header(ws, COLLAB_COLS + (["Gasto en este centro", "Neto en este centro"] if any("cost_in_cc" in c for c in collaborators) else []))
+    _header(ws, COLLAB_COLS + [h for h, _ in extra_cols])
     for c in collaborators:
         row = [
             c["funcod"], c["name"], CATEGORY_LABELS.get(c["category"], c["category"]),
@@ -87,8 +91,7 @@ def build_workbook(
             c["total_cost"], c["net_pay"], c["total_liabilities"], c["total_deductions"], c["entry_count"],
             ", ".join(c.get("file_labels") or []),
         ]
-        if "cost_in_cc" in c:
-            row += [c["cost_in_cc"], c.get("net_pay_in_cc", 0)]
+        row += [c.get(k, 0) for _, k in extra_cols]
         ws.append(row)
 
     ws = wb.create_sheet("Movimientos")
