@@ -13,8 +13,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { EmptyState, Money, ShareBar, StatTile, TableWrap, td, tdNum, th, thNum } from "@/components/finanzas/ui";
-import { apiFetch } from "@/lib/api";
+import { DownloadButton, EmptyState, Money, ShareBar, StatTile, TableWrap, td, tdNum, th, thNum } from "@/components/finanzas/ui";
+import { apiFetch, downloadFile } from "@/lib/api";
 import { CHART, KIND_LABEL, balanceStatus, gs, gsCompact, int, pct, type FinSummary } from "@/lib/finanzas";
 import { CategoryBadge } from "@/components/finanzas/ui";
 
@@ -32,6 +32,17 @@ export default function ResumenPage() {
   const [summary, setSummary] = useState<FinSummary | null>(null);
   const [error, setError] = useState("");
   const [showAllWarnings, setShowAllWarnings] = useState(false);
+  const [dlError, setDlError] = useState("");
+  // Descarga de un segmento (tarjeta): tipo de contrato o concepto de descuento
+  const downloadSegment = async (kind: "category" | "concept", value: string, label: string) => {
+    setDlError("");
+    try {
+      const name = `${summary?.period || "sesion"}_${label.replace(/[^\w-]+/g, "-")}.xlsx`;
+      await downloadFile(`/api/v1/finanzas/sessions/${params.id}/export/segment?kind=${kind}&value=${encodeURIComponent(value)}`, name);
+    } catch (e: any) {
+      setDlError(e.message || "No se pudo generar la descarga");
+    }
+  };
 
   useEffect(() => {
     apiFetch<{ summary: FinSummary }>(`/api/v1/finanzas/sessions/${params.id}/summary`)
@@ -96,6 +107,9 @@ export default function ResumenPage() {
 
   return (
     <div className="space-y-6">
+      {dlError && (
+        <div className="rounded-md bg-brand-primary-light text-brand-primary-dark text-sm px-3 py-2">⚠ {dlError}</div>
+      )}
       {/* KPIs principales */}
       <section>
         <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
@@ -118,12 +132,17 @@ export default function ResumenPage() {
             const c = cat[k];
             const accent = k === "mensualero" ? CHART.mensualero : k === "jornalero" ? CHART.jornalero : k === "egresos" ? CHART.third : CHART.slate;
             return (
-              <div key={k} className="card p-4" style={{ borderTop: `4px solid ${accent}` }}>
-                <div className="flex items-baseline justify-between">
+              <div key={k} className="card p-4 relative" style={{ borderTop: `4px solid ${accent}` }}>
+                <DownloadButton
+                  className="absolute top-3 right-3"
+                  title={`Descargar Excel · ${c.label}`}
+                  onClick={() => downloadSegment("category", k, c.label)}
+                />
+                <div className="flex items-baseline justify-between pr-10">
                   <div className="text-[11px] uppercase tracking-wider2 text-brand-slate font-semibold">{c.label}</div>
                   <div className="text-[11px] text-brand-slate">{pct(c.share)} del gasto</div>
                 </div>
-                <div className="flex items-end justify-between mt-1">
+                <div className="flex items-end justify-between mt-1 pr-10">
                   <div className="font-display text-3xl text-brand-ink leading-none">{int(c.people)}</div>
                   <div className="text-right">
                     <div className="font-semibold text-brand-ink tabular-nums" title={gs(c.cost)}>{gsCompact(c.cost)}</div>
@@ -438,6 +457,8 @@ export default function ResumenPage() {
                   full={gs(d.amount)}
                   hint={`${int(d.people)} colaboradores · prom. ${gsCompact(d.avg)} · máx. ${gsCompact(d.max)}`}
                   accent={d.concept === "anticipo" ? CHART.mensualero : d.concept === "descuento_promocional" ? CHART.jornalero : CHART.third}
+                  onDownload={() => downloadSegment("concept", d.concept, d.label)}
+                  downloadTitle={`Descargar Excel · ${d.label}`}
                 />
               ))}
               <StatTile
@@ -445,6 +466,8 @@ export default function ResumenPage() {
                 value={gsCompact(summary.deductions.total)}
                 full={gs(summary.deductions.total)}
                 hint={`${pct(summary.deductions.share_of_net_pay)} del neto a pagar · ${summary.deductions.by_file.map((f) => `${f.label} ${gsCompact(f.amount)}`).join(" · ")}`}
+                onDownload={() => downloadSegment("concept", "deducciones", "Anticipos y descuentos")}
+                downloadTitle="Descargar Excel · todos los anticipos y descuentos"
               />
             </div>
 

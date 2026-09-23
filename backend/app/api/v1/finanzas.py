@@ -30,6 +30,7 @@ from ...services.audit_service import log_action
 from ...services.finance_export import build_workbook, safe_filename
 from ...services.finance_service import (
     CONCEPT_LABELS,
+    DEDUCTION_CONCEPTS,
     FinanceFileError,
     classify_file,
     parse_workbook,
@@ -685,10 +686,12 @@ def _with_labels(entries, labels: dict[str, str]):
 
 
 async def _export_response(request, user, session, *, kind: str, entity_id: str, title: str,
-                           summary_rows, accounts, collaborators, entries, filename: str, db) -> Response:
+                           summary_rows, accounts, collaborators, entries, filename: str, db,
+                           extra_cols=None) -> Response:
     data = build_workbook(
         title=title, session_name=session.name, period_label=period_label(session.period),
         summary_rows=summary_rows, accounts=accounts, collaborators=collaborators, entries=entries,
+        extra_cols=extra_cols,
     )
     await log_action(
         db, user_id=user.id, user_email=user.email, user_role=user.role,
@@ -739,6 +742,7 @@ async def export_cost_center(
         title=f"Centro de costo {center['code']} · {center['desc']}",
         summary_rows=summary_rows, accounts=detail["accounts"], collaborators=detail["people"],
         entries=_with_labels(entries, labels), filename=filename, db=db,
+        extra_cols=[("Gasto en este centro", "cost_in_cc"), ("Neto en este centro", "net_pay_in_cc")],
     )
 
 
@@ -778,6 +782,112 @@ async def export_session(
         title=f"Sesión {session.name}", summary_rows=summary_rows, accounts=summary.get("accounts", []),
         collaborators=[_collab_out(c) for c in collabs], entries=_with_labels(entries, labels),
         filename=filename, db=db,
+    )
+
+
+def _accounts_from_entries(entries) -> list[dict]:
+    acc: dict[int, dict] = {}
+    for e in entries:
+        a = acc.setdefault(e.account_code, {
+            "code": e.account_code, "desc": e.account_desc, "type": e.account_type, "concept": e.concept,
+            "concept_label": CONCEPT_LABELS.get(e.concept, e.concept), "rows": 0, "people": set(),
+            "debit": 0, "credit": 0,
+        })
+        a["rows"] += 1
+        a["people"].add(e.funcod)
+        a["debit"] += e.debit
+        a["credit"] += e.credit
+    out = []
+    for a in sorted(acc.values(), key=lambda x: x["code"]):
+        out.append({**a, "people": len(a["people"]),
+                    "net": (a["debit"] - a["credit"]) if a["type"] == "gasto" else (a["credit"] - a["debit"])})
+    return out
+
+
+_SEGMENT_CATEGORIES = {
+    "mensualero": "Mensualeros", "jornalero": "Jornaleros (operadores)",
+    "sin_clasificar": "Sin clasificar", "egresos": "Egresos del período",
+}
+_SEGMENT_CONCEPTS = {
+    "anticipo": "Anticipos al personal", "descuento_promocional": "Descuentos promocionales",
+    "descuento_varios": "Descuentos varios", "embargo": "Embargos judiciales",
+    "deducciones": "Anticipos y descuentos (todos)",
+}
+
+
+@router.get("/sessions/{session_id}/export/segment")
+async def export_segment(
+    session_id: str,
+    request: Request,
+    kind: str = Query(pattern=r"^(category|concept)$"),
+    value: str = Query(max_length=40),
+    user: CurrentUser = Depends(require_finanzas),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Excel de un segmento de las tarjetas del resumen gerencial:
+    - kind=category: mensualero | jornalero | sin_clasificar | egresos
+      (colaboradores de ese tipo y todos sus movimientos)
+    - kind=concept: anticipo | descuento_promocional | descuento_varios |
+      embargo | deducciones (movimientos de ese concepto y quiénes lo tienen)
+    """
+    session = await _get_session(session_id, user, db)
+    _require_done(session)
+    labels = await _file_labels(db, session_id)
+
+    if kind == "category":
+        if value not in _SEGMENT_CATEGORIES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Categoría desconocida")
+        cq = select(FinanceCollaborator).where(FinanceCollaborator.session_id == session_id)
+        cq = cq.where(FinanceCollaborator.is_egreso.is_(True)) if value == "egresos" else cq.where(FinanceCollaborator.category == value)
+        collabs = (await db.execute(cq.order_by(FinanceCollaborator.total_cost.desc()))).scalars().all()
+        funcods = [c.funcod for c in collabs]
+        entries = (await db.execute(
+            select(FinanceEntry).where(FinanceEntry.session_id == session_id, FinanceEntry.funcod.in_(funcods))
+            .order_by(FinanceEntry.employee_name, FinanceEntry.cc_code, FinanceEntry.file_id, FinanceEntry.orden)
+        )).scalars().all() if funcods else []
+        title = _SEGMENT_CATEGORIES[value]
+        cost = sum(c.total_cost for c in collabs)
+        summary_rows = [
+            ("Segmento", title), ("Colaboradores", len(collabs)), ("Gasto total (Gs.)", cost),
+            ("Costo promedio (Gs.)", int(cost / len(collabs)) if collabs else 0),
+            ("Neto a pagar (Gs.)", sum(c.net_pay for c in collabs)), ("Líneas de asiento", len(entries)),
+        ]
+        collaborators = [_collab_out(c) for c in collabs]
+        extra_cols = None
+    else:
+        if value not in _SEGMENT_CONCEPTS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Concepto desconocido")
+        concepts = list(DEDUCTION_CONCEPTS) if value == "deducciones" else [value]
+        entries = (await db.execute(
+            select(FinanceEntry).where(FinanceEntry.session_id == session_id, FinanceEntry.concept.in_(concepts))
+            .order_by(FinanceEntry.cc_code, FinanceEntry.employee_name, FinanceEntry.file_id)
+        )).scalars().all()
+        per_person: dict[str, int] = {}
+        for e in entries:
+            per_person[e.funcod] = per_person.get(e.funcod, 0) + (e.credit - e.debit)
+        collabs = (await db.execute(
+            select(FinanceCollaborator).where(
+                FinanceCollaborator.session_id == session_id, FinanceCollaborator.funcod.in_(list(per_person))
+            )
+        )).scalars().all() if per_person else []
+        collaborators = sorted(
+            [dict(_collab_out(c), concept_amount=per_person.get(c.funcod, 0)) for c in collabs],
+            key=lambda x: -x["concept_amount"],
+        )
+        title = _SEGMENT_CONCEPTS[value]
+        total = sum(per_person.values())
+        summary_rows = [
+            ("Concepto", title), ("Colaboradores con el concepto", len(per_person)), ("Monto total (Gs.)", total),
+            ("Promedio por colaborador (Gs.)", int(total / len(per_person)) if per_person else 0),
+            ("Máximo individual (Gs.)", max(per_person.values(), default=0)), ("Líneas de asiento", len(entries)),
+        ]
+        extra_cols = [(f"Monto · {title}", "concept_amount")]
+
+    filename = safe_filename(session.period or session.name, kind, value)
+    return await _export_response(
+        request, user, session, kind=f"segment.{kind}", entity_id=value, title=title,
+        summary_rows=summary_rows, accounts=_accounts_from_entries(entries), collaborators=collaborators,
+        entries=_with_labels(entries, labels), filename=filename, db=db, extra_cols=extra_cols,
     )
 
 
