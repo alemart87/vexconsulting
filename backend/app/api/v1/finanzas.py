@@ -27,7 +27,12 @@ from ...models.finance import (
     FinanceSession,
 )
 from ...services.audit_service import log_action
-from ...services.finance_export import build_workbook, safe_filename
+from ...services.finance_export import (
+    IPS_EMPLOYER_RATE,
+    build_ips_workbook,
+    build_workbook,
+    safe_filename,
+)
 from ...services.finance_service import (
     CONCEPT_LABELS,
     DEDUCTION_CONCEPTS,
@@ -888,6 +893,90 @@ async def export_segment(
         request, user, session, kind=f"segment.{kind}", entity_id=value, title=title,
         summary_rows=summary_rows, accounts=_accounts_from_entries(entries), collaborators=collaborators,
         entries=_with_labels(entries, labels), filename=filename, db=db, extra_cols=extra_cols,
+    )
+
+
+@router.get("/sessions/{session_id}/export/ips")
+async def export_ips(
+    session_id: str,
+    request: Request,
+    user: CurrentUser = Depends(require_finanzas),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Planilla IPS del mes: por colaborador y por centro, con la apertura en
+    aporte patronal (carga social 16,5 %) y aporte obrero (9 %)."""
+    session = await _get_session(session_id, user, db)
+    summary = _require_done(session)
+    labels = await _file_labels(db, session_id)
+    entries = (await db.execute(
+        select(FinanceEntry).where(
+            FinanceEntry.session_id == session_id,
+            FinanceEntry.concept.in_(["ips_a_pagar", "carga_social"]),
+        ).order_by(FinanceEntry.cc_code, FinanceEntry.employee_name, FinanceEntry.file_id, FinanceEntry.orden)
+    )).scalars().all()
+
+    per_person: dict[str, dict] = {}
+    per_cc: dict[int, dict] = {}
+    for e in entries:
+        p = per_person.setdefault(e.funcod, {"total": 0, "employer": 0})
+        c = per_cc.setdefault(e.cc_code, {"code": e.cc_code, "desc": e.cc_desc, "total": 0, "employer": 0, "people": set()})
+        c["people"].add(e.funcod)
+        if e.concept == "ips_a_pagar":
+            amt = e.credit - e.debit
+            p["total"] += amt
+            c["total"] += amt
+        else:
+            amt = e.debit - e.credit
+            p["employer"] += amt
+            c["employer"] += amt
+
+    collabs = (await db.execute(
+        select(FinanceCollaborator).where(
+            FinanceCollaborator.session_id == session_id, FinanceCollaborator.funcod.in_(list(per_person))
+        )
+    )).scalars().all() if per_person else []
+    people = []
+    for col in collabs:
+        p = per_person[col.funcod]
+        employee = p["total"] - p["employer"]
+        base = int(round(p["employer"] / IPS_EMPLOYER_RATE)) if p["employer"] else 0
+        people.append({
+            "funcod": col.funcod, "name": col.name, "category": col.category, "position": col.position,
+            "cc_main_desc": col.cc_main_desc, "cc_count": col.cc_count, "base": base,
+            "employer": p["employer"], "employee": employee, "total": p["total"],
+            "check": employee - int(round(base * 0.09)),
+        })
+    people.sort(key=lambda x: -x["total"])
+
+    cc_desc = {cc["code"]: cc for cc in summary.get("cost_centers", [])}
+    centers = []
+    for c in per_cc.values():
+        info = cc_desc.get(c["code"], {})
+        employee = c["total"] - c["employer"]
+        centers.append({
+            "code": c["code"], "desc": info.get("desc", c["desc"]), "client": info.get("client", ""),
+            "people": len(c["people"]), "base": int(round(c["employer"] / IPS_EMPLOYER_RATE)) if c["employer"] else 0,
+            "employer": c["employer"], "employee": employee, "total": c["total"],
+        })
+    centers.sort(key=lambda x: -x["total"])
+
+    total = sum(p["total"] for p in people)
+    employer = sum(p["employer"] for p in people)
+    totals = {"people": len(people), "total": total, "employer": employer, "employee": total - employer,
+              "base": sum(p["base"] for p in people)}
+    data = build_ips_workbook(
+        session_name=session.name, period_label=period_label(session.period), totals=totals,
+        people=people, centers=centers, entries=_with_labels(entries, labels),
+    )
+    filename = safe_filename(session.period or session.name, "Planilla-IPS")
+    await log_action(
+        db, user_id=user.id, user_email=user.email, user_role=user.role,
+        action="finanzas.export.ips", entity_type="finance_session", entity_id=session.id,
+        detail={"bytes": len(data), "filename": filename, "people": len(people)}, ip=client_ip(request),
+    )
+    return Response(
+        content=data, media_type=_XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

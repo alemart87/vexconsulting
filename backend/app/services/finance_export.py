@@ -102,3 +102,75 @@ def build_workbook(
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Planilla IPS
+# ---------------------------------------------------------------------------
+
+IPS_EMPLOYER_RATE = 0.165  # aporte patronal
+IPS_EMPLOYEE_RATE = 0.09   # aporte obrero (retenido del colaborador)
+
+IPS_PERSON_COLS = [
+    "Funcod", "Colaborador", "Tipo", "Puesto", "Centro principal", "Centros",
+    "Base imponible (Gs.)", "Aporte patronal 16,5 % (Gs.)", "Aporte obrero 9 % (Gs.)",
+    "Total IPS a pagar (Gs.)", "Verificación obrero − 9 % base (Gs.)",
+]
+IPS_CC_COLS = [
+    "Centro de costo", "Descripción", "Cliente", "Personas", "Base imponible (Gs.)",
+    "Aporte patronal (Gs.)", "Aporte obrero (Gs.)", "Total IPS a pagar (Gs.)",
+]
+
+
+def build_ips_workbook(
+    *,
+    session_name: str,
+    period_label: str,
+    totals: dict,
+    people: list[dict],
+    centers: list[dict],
+    entries: Iterable,
+) -> bytes:
+    """Planilla IPS del mes: totales, apertura por colaborador, por centro de
+    costo y los movimientos de las cuentas de IPS y carga social."""
+    from openpyxl import Workbook
+
+    wb = Workbook(write_only=True)
+
+    ws = wb.create_sheet("Resumen IPS")
+    _header(ws, ["VEXFINANZAS", "Planilla IPS"])
+    ws.append(["Sesión", session_name])
+    ws.append(["Período", period_label])
+    ws.append(["Colaboradores con aporte", totals["people"]])
+    ws.append(["Base imponible (Gs.)", totals["base"]])
+    ws.append(["Aporte patronal 16,5 % (Gs.)", totals["employer"]])
+    ws.append(["Aporte obrero 9 % (Gs.)", totals["employee"]])
+    ws.append(["Total IPS a pagar (Gs.)", totals["total"]])
+    ws.append(["Centros de costo", len(centers)])
+    ws.append([])
+    ws.append(["Cómo se calcula", "Total IPS a pagar = cuenta 213001 (haber). Aporte patronal = cuentas de "
+               "Carga Social 16,5 % (510073 / 520253, debe). Aporte obrero = total − patronal. "
+               "Base imponible = patronal ÷ 0,165. La verificación compara el obrero con el 9 % de la base "
+               "(diferencias de pocos guaraníes son redondeo del prorrateo entre centros)."])
+
+    ws = wb.create_sheet("Por colaborador")
+    _header(ws, IPS_PERSON_COLS)
+    for p in people:
+        ws.append([
+            p["funcod"], p["name"], CATEGORY_LABELS.get(p["category"], p["category"]), p.get("position"),
+            p.get("cc_main_desc"), p["cc_count"], p["base"], p["employer"], p["employee"], p["total"], p["check"],
+        ])
+
+    ws = wb.create_sheet("Por centro de costo")
+    _header(ws, IPS_CC_COLS)
+    for c in centers:
+        ws.append([c["code"], c["desc"], c["client"], c["people"], c["base"], c["employer"], c["employee"], c["total"]])
+
+    ws = wb.create_sheet("Movimientos")
+    _header(ws, ENTRY_COLS)
+    for e in entries:
+        ws.append(_entry_row(e))
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
