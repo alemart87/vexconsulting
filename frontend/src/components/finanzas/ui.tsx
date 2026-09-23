@@ -12,12 +12,46 @@ export function DownloadButton({
   // Posición: «relative» en flujo, o «absolute top-3 right-3» en una esquina.
   // (No se fija acá para que la clase pasada no compita con ella en el CSS.)
   className = "relative",
+  label,
 }: {
   onClick: () => Promise<void> | void;
   title?: string;
   className?: string;
+  /** Con etiqueta se vuelve una píldora («⬇ Descargar IPS») en vez del círculo. */
+  label?: string;
 }) {
   const [busy, setBusy] = useState(false);
+  if (label) {
+    return (
+      <button
+        type="button"
+        title={title}
+        disabled={busy}
+        onClick={async (e) => {
+          e.stopPropagation();
+          setBusy(true);
+          try {
+            await onClick();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className={`group h-8 pl-2.5 pr-3 rounded-full bg-brand-primary text-white text-xs font-semibold shadow-soft inline-flex items-center gap-1.5 whitespace-nowrap transition-transform hover:scale-105 hover:bg-brand-primary-dark disabled:opacity-60 ${className}`}
+      >
+        <span className="absolute inset-0 rounded-full ring-2 ring-brand-primary/40 animate-ping group-hover:hidden" aria-hidden style={{ animationDuration: "2.4s" }} />
+        {busy ? (
+          <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden />
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
+            <path d="M12 3v12" />
+            <path d="m7 10 5 5 5-5" />
+            <path d="M4 19h16" />
+          </svg>
+        )}
+        <span className="relative">{busy ? "Generando…" : label}</span>
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -59,6 +93,7 @@ export function StatTile({
   full,
   onDownload,
   downloadTitle,
+  downloadLabel,
 }: {
   label: string;
   value: string;
@@ -69,13 +104,15 @@ export function StatTile({
   /** Botón de descarga en la esquina superior derecha. */
   onDownload?: () => Promise<void> | void;
   downloadTitle?: string;
+  /** Con etiqueta, el botón es una píldora con texto (p. ej. «Descargar IPS»). */
+  downloadLabel?: string;
 }) {
   return (
     <div className="card p-4 min-w-0 relative">
       {onDownload && (
-        <DownloadButton onClick={onDownload} title={downloadTitle} className="absolute top-3 right-3" />
+        <DownloadButton onClick={onDownload} title={downloadTitle} label={downloadLabel} className="absolute top-3 right-3" />
       )}
-      <div className={`text-[10px] uppercase tracking-wider2 text-brand-slate font-semibold leading-snug ${onDownload ? "pr-9" : ""}`}>
+      <div className={`text-[10px] uppercase tracking-wider2 text-brand-slate font-semibold leading-snug ${onDownload ? (downloadLabel ? "pr-36" : "pr-9") : ""}`}>
         {label}
       </div>
       <div

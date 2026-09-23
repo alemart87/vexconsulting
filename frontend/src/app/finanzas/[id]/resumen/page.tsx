@@ -118,7 +118,22 @@ export default function ResumenPage() {
           <StatTile label="Centros de costo" value={int(t.cost_centers)} hint={`${int(t.clients)} clientes/negocios`} />
           <StatTile label="Cuentas contables" value={int(t.accounts)} hint={`${int(t.rows)} líneas de asiento`} />
           <StatTile label="Neto a pagar" value={gsCompact(t.net_pay)} full={gs(t.net_pay)} hint="Sueldos y jornales a pagar" />
-          <StatTile label="IPS a pagar" value={gsCompact(t.ips)} full={gs(t.ips)} hint="Aporte patronal + obrero" />
+          <StatTile
+            label="IPS a pagar"
+            value={gsCompact(t.ips)}
+            full={gs(t.ips)}
+            hint="Aporte patronal 16,5 % + obrero 9 %"
+            downloadLabel="Descargar IPS"
+            downloadTitle="Planilla IPS del mes: por colaborador y por centro, con aporte patronal y obrero"
+            onDownload={async () => {
+              setDlError("");
+              try {
+                await downloadFile(`/api/v1/finanzas/sessions/${params.id}/export/ips`, `${summary.period || "sesion"}_Planilla-IPS.xlsx`);
+              } catch (e: any) {
+                setDlError(e.message || "No se pudo generar la planilla IPS");
+              }
+            }}
+          />
           <StatTile label="Costo promedio" value={gsCompact(t.avg_cost_per_person)} full={gs(t.avg_cost_per_person)} hint="Por colaborador" />
           <StatTile label="Archivos cruzados" value={int(t.files)} hint={summary.files.every((f) => balanceStatus(f.diff).ok) ? (t.balance_diff === 0 ? "Todos cuadran" : `Todos cuadran (redondeo ${int(t.balance_diff)} Gs.)`) : `${summary.files.filter((f) => !balanceStatus(f.diff).ok).length} sin cuadrar`} />
         </div>
